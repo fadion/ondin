@@ -105,7 +105,7 @@ pub static TOOLS: &[Tool] = &[
                 "page",
                 ParamKind::Node,
                 false,
-                "The page; the first when absent.",
+                "The page; the person's page (`get_view`) when absent.",
             ),
         ],
     },
@@ -120,13 +120,18 @@ pub static TOOLS: &[Tool] = &[
         params: &[],
     },
     Tool {
+        name: "get_view",
+        doc: "What the person sees: the page they are on, which the reads default to, the camera's center and zoom, and, while the document is the tab in front, `visible`, the world rectangle the canvas shows as [x, y, width, height]. A document nobody has open is on its first page.",
+        params: &[],
+    },
+    Tool {
         name: "export_svg",
         doc: "A page or a layer as SVG text.",
         params: &[param(
             "id",
             ParamKind::Node,
             false,
-            "A layer or page; the first page when absent.",
+            "A layer or page; the person's page when absent.",
         )],
     },
     Tool {
@@ -137,7 +142,7 @@ pub static TOOLS: &[Tool] = &[
                 "id",
                 ParamKind::Node,
                 false,
-                "A layer or page; the first page when absent.",
+                "A layer or page; the person's page when absent.",
             ),
             param(
                 "max",
@@ -171,7 +176,7 @@ pub static TOOLS: &[Tool] = &[
                 "ids",
                 ParamKind::Nodes,
                 false,
-                "The layers; the selection when absent, else the first page's layers.",
+                "The layers; the selection when absent, else the layers of the person's page.",
             ),
         ],
     },
@@ -227,7 +232,7 @@ pub static TOOLS: &[Tool] = &[
                 "page",
                 ParamKind::Node,
                 false,
-                "The page when no `ids`; the first when absent.",
+                "The page when no `ids`; the person's page when absent.",
             ),
             param(
                 "level",

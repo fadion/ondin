@@ -287,7 +287,8 @@ fn a_document_with_available_fonts_warns_about_nothing() {
 /// **The snapshot says *which* picture, not just that there is one.** A bare
 /// `Image` variant cannot answer the first question anyone asks about a
 /// photograph in a document, and the id is its content hash, so it doubles as
-/// "these two fills are the same file" (§7.1, §15 D185).
+/// "these two fills are the same file" (§7.1, §15 D185). Its pixel size says
+/// what aspect `fit` and `crop` keep.
 #[test]
 fn an_image_fill_is_summarised_by_its_id_and_its_framing_mode() {
     use ondin_core::{
@@ -303,7 +304,7 @@ fn an_image_fill_is_summarised_by_its_id_and_its_framing_mode() {
                 entry: ImageEntry {
                     source: ImageSource::Embedded(vec![1, 2, 3].into()),
                     format: ImageFormat::Png,
-                    width: 200,
+                    width: 300,
                     height: 200,
                 },
             },
@@ -327,8 +328,10 @@ fn an_image_fill_is_summarised_by_its_id_and_its_framing_mode() {
 
     let json = serde_json::to_string(&snapshot(&f.doc, &f.res)).expect("serialise");
     assert!(
-        json.contains(r#""type":"Image","id":"hash-of-the-bytes","fit":"tile""#),
-        "the summary has to name the file and how it sits: {json}"
+        json.contains(
+            r#""type":"Image","id":"hash-of-the-bytes","pixel_size":[300,200],"fit":"tile""#
+        ),
+        "the summary has to name the file, its size and how it sits: {json}"
     );
 }
 

@@ -44,7 +44,7 @@ Every tool carries annotations from `schema::class`: `readOnlyHint` for the read
 
 Phase 1 — read/export (ship first):
 `use_document(document)`, `get_document() -> Snapshot`, `get_node(id)`, `list_children(id)`, `find_nodes(query)`, `find_like(id, by)`, `hit_test(x,y)`,
-`get_bounds(id) -> [x, y, width, height]`, `get_selection() -> {ids}`, `export_svg(id?)`, `export_png(id?, max?)`,
+`get_bounds(id) -> [x, y, width, height]`, `get_selection() -> {ids}`, `get_view()`, `export_svg(id?)`, `export_png(id?, max?)`,
 `run_exports(ids?) -> Vec<File>`, `export_code(target, ids?) -> CodeExport`, `list_components()`, `list_variables() -> VariableTable`,
 `list_styles() -> StyleTable`, `export_tokens()`, `list_fonts(query?)`, `check_contrast(ids?, page?, level?, non_text?)`,
 `review_colours(ids?, threshold?)`.
@@ -90,7 +90,7 @@ Phase 4 — kits and the library (the app's own actions, some outside undo):
 `make_local(ids)`, `map_kit_modes(kit, mapping)`, `make_kit()`, `publish_kit(note)`,
 `stop_sharing_kit()`, `import_tokens(tokens, collection?, removals?)`, `list_versions()`, `save_version(name?)`.
 
-Selection is app state, not document state (§9.3), but deliberately part of the MCP surface, because "the selected layer" is how humans phrase most AI requests. The MCP layer reads and writes it in the owning process's session state, never the `Document`.
+Selection is app state, not document state (§9.3), but deliberately part of the MCP surface, because "the selected layer" is how humans phrase most AI requests. The MCP layer reads and writes it in the owning process's session state, never the `Document`. So is the view: `get_view` answers the page the person is on, the camera's centre and zoom, and the world rectangle the canvas shows while the document is the tab in front, so "what I'm looking at" resolves without a guess. A read that takes a page (`hit_test`, `export_svg`, `export_png`, `check_contrast`, `export_code` with nothing selected) defaults to that page; `serve` and a document nobody has open are on the first page.
 
 Which of this is built: the wire, the proxy, `serve`, the window as a host (`mcp::window`), and every tool of every phase; `tools/list` offers them all (`ondin_mcp::schema`).
 
@@ -101,7 +101,7 @@ Which of this is built: the wire, the proxy, `serve`, the window as a host (`mcp
   layer's defaults with that attribute's runs dropped, as the type panel writes it.
 - A page is named by its root node's id: `create_node`'s and `insert_subtree`'s parent may be one,
   and `set_name` renames one.
-- `create_node`, `insert_subtree`, `duplicate`, `convert_container`, `add_page` and `duplicate_page` return the new ids (the handler minted them); so do `create_instance`, `insert_from_kit`, `add_image`, `add_variable`, `add_mode`, `add_collection`, `duplicate_collection` and `add_style`.
+- `create_node`, `insert_subtree`, `duplicate`, `convert_container`, `add_page` and `duplicate_page` return the new ids (the handler minted them); so do `create_instance`, `insert_from_kit`, `add_image`, `add_variable`, `add_mode`, `add_collection`, `duplicate_collection` and `add_style`. `add_image` also answers the picture's `pixel_size`, as the paint summary of an image fill carries it.
 - The snapshot exposes world transforms so agents can compute local placements; a `place_at_world(id, world_transform)` adapter is allowed in core if agents struggle.
 - `set_blend(nodes, blend)` takes the mode as the snapshot names it (`"Multiply"`, `"Pass through"`) and writes through `build::set_blend_all`, as the inspector and `Shift`+digits do: the outermost members only, and Pass through landing as Normal on a layer that is not a frame or group.
 - A chart is edited through its four verbs, which write `SetChart`; its parts regenerate after the commit (`chart::settle`), and any other tool writing a part is refused by `chart::guard` (*Part of a chart — edit the chart, or flatten it first*). `insert_chart` makes a 480 × 280 frame on the kind's sample table, or on the table given with its mapping read off the column types (`chart::Mapping::guess`) unless one is given; `set_chart`'s `mapping` and `options` are JSON merge patches over the chart's own; `set_chart_data` keeps the mapping and series colours of each column whose name survives (`Chart::with_table`) and drops the linked file; `flatten_chart` is `chart::flatten_ops` for each chart (*Flatten*, `charts.md`). The snapshot's `chart` names the column ids they take.
@@ -174,7 +174,7 @@ The raw kit ops (`OpenVault`, `CloseVault`, `SetOrigin`, a `SetKitModes` rewriti
 
 `set_exports` writes a layer's export list (the *Export* card's rows: format, scale, prefix and suffix, background, quality, trim, square padding; `ExportSpec`, see export.md §7). `run_exports` renders the listed layers' files through `ondin_export::plan` and `plan::render` (the path `ondin export --all` takes) and **returns bytes with their names** rather than writing them, each file an embedded resource (text for SVG, base64 otherwise); where files land is the client's and the person's call. With no `ids` it takes the layers *Export all* takes (`panels::exportable_layers_of`); the CLI keeps its own copy of that walk, held to the same answer by `build::all_in_document_order`.
 
-`export_code` writes layers as HTML/CSS, React or Vue through `code::Target::export` (export.md, *Code export*), the CLI's `--html`, `--react` and `--vue` path, and returns the files with the three report lists (`approximated`, `positioned`, `inlined`) beside them, never writing to disk. `ids` defaults to the selection, as *Export as HTML / React / Vue…* takes it, and with nothing selected (always, in `serve`) to the first page's layers, as the CLI takes them. It is the door the deterministic translation exists for: the snapshot carries used values, so CSS an agent writes from it is absolute positions, where `export_code` keeps the specified layout, the variables and the components for the agent to build on.
+`export_code` writes layers as HTML/CSS, React or Vue through `code::Target::export` (export.md, *Code export*), the CLI's `--html`, `--react` and `--vue` path, and returns the files with the three report lists (`approximated`, `positioned`, `inlined`) beside them, never writing to disk. `ids` defaults to the selection, as *Export as HTML / React / Vue…* takes it, and with nothing selected (always, in `serve`) to the layers of the person's page, the first page's in `serve` as the CLI takes them. It is the door the deterministic translation exists for: the snapshot carries used values, so CSS an agent writes from it is absolute positions, where `export_code` keeps the specified layout, the variables and the components for the agent to build on.
 
 #### Checks, tokens, fonts and versions
 

@@ -165,6 +165,11 @@ impl Documents for OndinApp {
         self.fonts.matched_names("", 0..all)
     }
 
+    fn canvas(&mut self, path: &Path) -> Option<(u32, u32)> {
+        let id = self.tab_of_path(path)?;
+        (self.tabs.active == Some(id)).then_some(self.canvas_px)
+    }
+
     fn library(&mut self) -> Option<&Library> {
         self.library.refresh();
         Some(&self.library)

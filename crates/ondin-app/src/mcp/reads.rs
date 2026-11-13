@@ -81,7 +81,7 @@ pub(super) fn export_code(
         None if !s.selection.ids().is_empty() => s.selection.ids().to_vec(),
         None => s
             .doc
-            .get(s.doc.first_page())
+            .get(s.page)
             .map(|p| p.children().to_vec())
             .unwrap_or_default(),
     };

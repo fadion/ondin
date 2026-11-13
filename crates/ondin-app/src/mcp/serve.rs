@@ -144,6 +144,10 @@ impl Documents for Headless {
             .families()
             .to_vec()
     }
+
+    fn canvas(&mut self, _: &Path) -> Option<(u32, u32)> {
+        None
+    }
 }
 
 /// The lock only one `serve` holds, `None` when another does. Without a run

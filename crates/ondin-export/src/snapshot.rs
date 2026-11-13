@@ -44,7 +44,9 @@ use std::collections::BTreeMap;
 ///   gives its children and takes from its parent.
 /// - **19** `NodeSnapshot::bindings`, `styles`, `modes`, `component` and
 ///   `fill_indices`; `StrokeSummary::id` and `index`, `EffectSummary::id`.
-pub const SNAPSHOT_VERSION: u32 = 19;
+/// - **20** `PaintSummary::Image` gained `pixel_size`, the picture's own width
+///   and height.
+pub const SNAPSHOT_VERSION: u32 = 20;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -421,6 +423,10 @@ pub enum PaintSummary {
     Image {
         /// The content hash the table is keyed by.
         id: String,
+        /// The picture's own width and height in pixels, which set its aspect
+        /// under `fit` and `crop`; absent when the table has no such picture.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pixel_size: Option<[u32; 2]>,
         /// `fill` | `fit` | `crop` | `tile`.
         fit: String,
         /// The sampler's alpha, which is what an image fill's opacity is (§5.5a).
@@ -583,7 +589,7 @@ fn node_snapshot(
             .iter()
             .filter(|f: &&ondin_core::Keyed<Fill>| f.visible)
             // The resolved value, not the binding: a reader sees what is drawn.
-            .map(|f| paint_summary(&doc.resolve_brush(id, &f.brush)))
+            .map(|f| paint_summary(doc, &doc.resolve_brush(id, &f.brush)))
             .collect(),
         strokes: node
             .paint()
@@ -594,7 +600,7 @@ fn node_snapshot(
             .map(|(index, s)| StrokeSummary {
                 id: s.id,
                 index,
-                paint: paint_summary(&doc.resolve_brush(id, &s.brush)),
+                paint: paint_summary(doc, &doc.resolve_brush(id, &s.brush)),
                 width: match s.width_var {
                     Some(v) => doc.stroke_width_drawn_in(doc.variables(), id, v),
                     None => s.width,
@@ -758,7 +764,7 @@ fn chart_summary(doc: &Document, id: NodeId, c: &ondin_core::chart::Chart) -> Ch
                     column: col.0,
                     name: t.column(*col).map_or_else(String::new, |x| x.name.clone()),
                     visible: style.is_none_or(|s| s.visible),
-                    fill: style.map(|s| paint_summary(&doc.resolve_brush(id, &s.fill))),
+                    fill: style.map(|s| paint_summary(doc, &doc.resolve_brush(id, &s.fill))),
                 }
             })
             .collect(),
@@ -982,7 +988,7 @@ fn hex(c: ondin_core::peniko::Color) -> (String, f32) {
     )
 }
 
-fn paint_summary(brush: &Brush) -> PaintSummary {
+fn paint_summary(doc: &Document, brush: &Brush) -> PaintSummary {
     match brush {
         Brush::Solid(c) => {
             let (color, alpha) = hex(*c);
@@ -1015,6 +1021,7 @@ fn paint_summary(brush: &Brush) -> PaintSummary {
         },
         Brush::Image(img) => PaintSummary::Image {
             id: img.image.id.0.clone(),
+            pixel_size: doc.image(&img.image.id).map(|e| [e.width, e.height]),
             fit: match img.image.fit {
                 ondin_core::ImageFit::Fill => "fill",
                 ondin_core::ImageFit::Fit => "fit",

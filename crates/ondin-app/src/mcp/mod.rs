@@ -46,6 +46,10 @@ pub(crate) trait Documents {
     fn tell(&mut self, line: String);
     /// Every font family a text here can be set in, sorted.
     fn fonts(&mut self) -> Vec<String>;
+    /// The canvas's size in device pixels while the document at `path` is the
+    /// tab in front of the person; `None` behind and in `serve`, where nobody
+    /// looks at it.
+    fn canvas(&mut self, path: &Path) -> Option<(u32, u32)>;
 }
 
 /// The document `wanted` names: an absolute path; else a name or relative path
@@ -340,6 +344,10 @@ impl Engine {
                 "No document yet: call `use_document` with the file the person named.",
             );
         };
+        let canvas = match call.tool.as_str() {
+            "get_view" => docs.canvas(&path),
+            _ => None,
+        };
         let Some(session) = docs.session(&path) else {
             conn.document = None;
             conn.shown.clear();
@@ -356,6 +364,8 @@ impl Engine {
             kits::run(docs, &path, &call)
         } else if actions::TOOLS.contains(&call.tool.as_str()) {
             actions::run(docs, &path, &call)
+        } else if call.tool == "get_view" {
+            Ok(Answer::Json(view(session, canvas)))
         } else {
             run(conn, session, &call)
         };
@@ -531,16 +541,36 @@ fn index(args: &Value, name: &str) -> Option<u64> {
     args.get(name).and_then(Value::as_u64)
 }
 
-/// The page `id` names or sits on; the first page for none.
+/// The page `id` names or sits on; for none, the page the person is on (the
+/// first in a document nobody has open).
 fn page_of(s: &EditorSession, id: Option<NodeId>) -> Result<NodeId, String> {
     match id {
-        None => Ok(s.doc.first_page()),
+        None => Ok(s.page),
         Some(id) if is_page(s, id) => Ok(id),
         Some(id) => s
             .doc
             .page_of(id)
             .ok_or_else(|| format!("no layer `{}`", id.to_wire())),
     }
+}
+
+/// What the person sees of the document: the page they are on, the camera's
+/// centre and zoom, and, while it is the tab in front (`canvas`), the world
+/// rectangle the canvas shows.
+fn view(s: &EditorSession, canvas: Option<(u32, u32)>) -> Value {
+    let name = s.doc.get(s.page).map(|p| p.name().to_owned());
+    let c = s.camera;
+    let mut answer = json!({
+        "page": { "id": s.page.to_wire(), "name": name },
+        "center": [c.center.x, c.center.y],
+        "zoom": c.zoom,
+        "in_front": canvas.is_some(),
+    });
+    if let Some(px) = canvas {
+        let r = c.viewport(px).view;
+        answer["visible"] = json!([r.x0, r.y0, r.width(), r.height()]);
+    }
+    answer
 }
 
 fn is_page(s: &EditorSession, id: NodeId) -> bool {
@@ -890,12 +920,24 @@ fn write(
         stale(conn, s, base, &done.tx)?;
     }
     commit(s, client, verb.name, done.tx)?;
+    // A picture's own size, which decides what aspect `fit` and `crop` keep.
+    let pixels = match verb.name {
+        "add_image" => done
+            .made
+            .as_ref()
+            .and_then(|id| s.doc.image(&ondin_core::ImageId(id.clone())))
+            .map(|e| [e.width, e.height]),
+        _ => None,
+    };
     let mut answer = json!({
         "created": done.created.iter().map(|i| i.to_wire()).collect::<Vec<_>>(),
         "made": done.made,
     });
     if let Some(said) = done.said {
         answer["said"] = json!(said);
+    }
+    if let Some(px) = pixels {
+        answer["pixel_size"] = json!(px);
     }
     Ok(Answer::Json(answer))
 }
@@ -1043,6 +1085,9 @@ mod tests {
         fn fonts(&mut self) -> Vec<String> {
             vec!["Inter".into(), "Inter Tight".into(), "Lora".into()]
         }
+        fn canvas(&mut self, path: &Path) -> Option<(u32, u32)> {
+            (path == self.path).then_some((800, 600))
+        }
     }
 
     fn call(engine: &mut Engine, docs: &mut One, conn: Conn, tool: &str, args: Value) -> Output {
@@ -1165,6 +1210,83 @@ mod tests {
         let page = docs.session.page.to_wire();
         assert!(set(&mut engine, &mut docs, json!([page])).is_error);
         assert_eq!(docs.session.selection.ids().len(), 1, "left as it was");
+    }
+
+    /// `get_view` answers the page the person is on and what the canvas shows,
+    /// and a read with no page reads that page, not the first.
+    ///
+    /// flip: `page_of` answering the first page for none → fails at "on the
+    /// person's page".
+    #[test]
+    fn get_view_answers_the_persons_page_and_reads_default_to_it() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let added = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "add_page",
+            json!({ "name": "Two" }),
+        );
+        let two = ok(&added)["created"][0].as_str().unwrap().to_owned();
+        let page = NodeId::from_wire(&two).unwrap();
+        docs.session.switch_page(page);
+        let kind = ondin_core::verbs::example("NodeKind").unwrap();
+        let args = json!({ "parent": two, "kind": kind });
+        let made = call(&mut engine, &mut docs, 1, "create_node", args);
+        let rect = ok(&made)["created"][0].clone();
+        let view = call(&mut engine, &mut docs, 1, "get_view", json!({}));
+        let view = ok(&view);
+        assert_eq!(view["page"]["id"], json!(two));
+        assert_eq!(view["page"]["name"], json!("Two"));
+        let r = docs.session.camera.viewport((800, 600)).view;
+        assert_eq!(view["visible"], json!([r.x0, r.y0, r.width(), r.height()]));
+        // The example rectangle is 120 × 80 at the page's origin, where the first
+        // page's frame also sits.
+        let hit = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "hit_test",
+            json!({ "x": 10, "y": 10 }),
+        );
+        assert_eq!(ok(&hit)["ids"], json!([rect]), "on the person's page");
+    }
+
+    /// `add_image` answers the picture's own size beside its id.
+    ///
+    /// flip: `write` leaving out `pixel_size` → fails at the size.
+    #[test]
+    fn add_image_answers_the_pictures_pixel_size() {
+        fn base64(bytes: &[u8]) -> String {
+            const ABC: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+            let mut out = String::new();
+            for chunk in bytes.chunks(3) {
+                let b = [
+                    chunk[0],
+                    *chunk.get(1).unwrap_or(&0),
+                    *chunk.get(2).unwrap_or(&0),
+                ];
+                let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+                for i in 0..4 {
+                    match i <= chunk.len() {
+                        true => out.push(ABC[(n >> (18 - 6 * i)) as usize & 63] as char),
+                        false => out.push('='),
+                    }
+                }
+            }
+            out
+        }
+        let mut png = Vec::new();
+        image::RgbaImage::new(3, 2)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let args = json!({ "bytes": base64(&png) });
+        let out = call(&mut engine, &mut docs, 1, "add_image", args);
+        assert!(ok(&out)["made"].is_string());
+        assert_eq!(ok(&out)["pixel_size"], json!([3, 2]), "the size");
     }
 
     /// A connection that never called closing is no client leaving, which

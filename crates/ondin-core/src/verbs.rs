@@ -196,43 +196,52 @@ pub struct Args<'a> {
     map: &'a Map<String, Value>,
 }
 
+/// `value` checked against the parameters of the tool called `name`: an object
+/// holding every required one, no other, each of its kind. MCP's own tools, which
+/// are not verbs, are checked by it too.
+pub fn check_args<'a>(
+    name: &'static str,
+    params: &[Param],
+    value: &'a Value,
+) -> Result<&'a Map<String, Value>, VerbError> {
+    let map = match value {
+        Value::Object(map) => map,
+        Value::Null if params.iter().all(|p| !p.required) => {
+            static EMPTY: std::sync::OnceLock<Map<String, Value>> = std::sync::OnceLock::new();
+            EMPTY.get_or_init(Map::new)
+        }
+        _ => return Err(VerbError::NotAnObject(name)),
+    };
+    if let Some(extra) = map.keys().find(|k| !params.iter().any(|p| p.name == *k)) {
+        return Err(VerbError::Unexpected {
+            verb: name,
+            param: extra.clone(),
+        });
+    }
+    for p in params {
+        match map.get(p.name) {
+            None | Some(Value::Null) if p.required => {
+                return Err(VerbError::Missing {
+                    verb: name,
+                    param: p.name,
+                });
+            }
+            None | Some(Value::Null) => {}
+            Some(v) => check_kind(p.kind, v).map_err(|why| VerbError::Invalid {
+                verb: name,
+                param: p.name,
+                why,
+            })?,
+        }
+    }
+    Ok(map)
+}
+
 impl<'a> Args<'a> {
     /// `value` checked against `verb`'s parameters: an object holding every required
     /// one, no other, each of its kind.
     fn check(verb: &'static Verb, value: &'a Value) -> Result<Self, VerbError> {
-        let map = match value {
-            Value::Object(map) => map,
-            Value::Null if verb.params.iter().all(|p| !p.required) => {
-                static EMPTY: std::sync::OnceLock<Map<String, Value>> = std::sync::OnceLock::new();
-                EMPTY.get_or_init(Map::new)
-            }
-            _ => return Err(VerbError::NotAnObject(verb.name)),
-        };
-        if let Some(extra) = map
-            .keys()
-            .find(|k| !verb.params.iter().any(|p| p.name == *k))
-        {
-            return Err(VerbError::Unexpected {
-                verb: verb.name,
-                param: extra.clone(),
-            });
-        }
-        for p in verb.params {
-            match map.get(p.name) {
-                None | Some(Value::Null) if p.required => {
-                    return Err(VerbError::Missing {
-                        verb: verb.name,
-                        param: p.name,
-                    });
-                }
-                None | Some(Value::Null) => {}
-                Some(v) => check_kind(p.kind, v).map_err(|why| VerbError::Invalid {
-                    verb: verb.name,
-                    param: p.name,
-                    why,
-                })?,
-            }
-        }
+        let map = check_args(verb.name, verb.params, value)?;
         Ok(Self { verb, map })
     }
 
@@ -431,6 +440,11 @@ pub fn check_model(model: &str, v: &Value) -> Result<(), String> {
         // Patches, whose nulls reset what they name (`patched`).
         "ChartMapping" => reads::<crate::chart::Mapping>(&without_nulls(v)),
         "ChartOptions" => reads::<crate::chart::Options>(&without_nulls(v)),
+        // MCP's own tools: their handlers read the rest.
+        "KitModeMap" if v.is_object() => Ok(()),
+        "KitModeMap" => Err("expected an object of mode ids".into()),
+        "DtcgFile" if v.is_object() || v.is_string() => Ok(()),
+        "DtcgFile" => Err("expected the tokens file, as text or as an object".into()),
         _ => Err(format!("no model type is called `{model}`")),
     }
 }

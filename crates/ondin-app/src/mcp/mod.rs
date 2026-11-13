@@ -278,6 +278,9 @@ impl Engine {
 
     /// Answer one call.
     pub(crate) fn handle(&mut self, docs: &mut impl Documents, call: Call) -> Output {
+        if let Err(why) = check_call(&call) {
+            return Output::error(why);
+        }
         let conn = self.client(&call);
         if call.tool == "use_document" {
             let Some(wanted) = call.args.get("document").and_then(Value::as_str) else {
@@ -406,6 +409,35 @@ impl Engine {
     }
 }
 
+/// Refuse a tool no host serves, before anything else, and a table tool's
+/// arguments as a verb's are refused: unknown, missing or of the wrong kind. A
+/// `"12"` for a `since` read as absent answered in full without a word.
+fn check_call(call: &Call) -> Result<(), String> {
+    if ondin_core::verbs::find(&call.tool).is_some() {
+        return Ok(());
+    }
+    let Some(tool) = ondin_mcp::schema::tool(&call.tool) else {
+        return Err(format!(
+            "No tool is called `{}`; `tools/list` names them.",
+            call.tool
+        ));
+    };
+    let mut args = call.args.clone();
+    // An empty selection clears it, where a layer list elsewhere needs one.
+    if tool.name == "set_selection" && call.args.get("ids") == Some(&json!([])) {
+        return Ok(());
+    }
+    // The proxy's restore after a reconnect, never listed to the agent.
+    if tool.name == "use_document"
+        && let Some(map) = args.as_object_mut()
+    {
+        map.remove("restore");
+    }
+    ondin_core::verbs::check_args(tool.name, tool.params, &args)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 fn remember(conn: &mut Connection, rev: u64, layers: HashMap<String, Layer>, own: bool) {
     if conn.shown.back().is_some_and(|s| s.rev == rev) {
         return;
@@ -518,6 +550,28 @@ fn is_page(s: &EditorSession, id: NodeId) -> bool {
 /// The default longest side of `export_png`.
 const PNG_MAX: u64 = 1600;
 
+/// The longest answer a whole-part read gives, in bytes. Harnesses cut a tool
+/// result past their own limit (Claude Code's is about 25,000 tokens), and a
+/// snapshot cut mid-way reads as a smaller document; a refusal naming the size
+/// and the narrower reads is what the model can act on.
+const ANSWER_BUDGET: usize = 100_000;
+
+/// Refuse `text` past [`ANSWER_BUDGET`], saying what to read `instead`.
+fn within_budget(text: &str, what: &str, instead: &str) -> Result<(), String> {
+    match text.len() {
+        n if n <= ANSWER_BUDGET => Ok(()),
+        n => Err(format!(
+            "{what} is {} KB, past the {} KB a client is sure to read whole: {instead}",
+            n / 1000,
+            ANSWER_BUDGET / 1000
+        )),
+    }
+}
+
+/// What a read past the budget points to.
+const NARROWER: &str =
+    "reach the part you need with `find_nodes` or `list_children`, then `get_node` on it";
+
 /// The most `export_png`'s `max` is taken at: a raster held in the person's
 /// window, where an unbounded one could exhaust its memory and lose every tab.
 const PNG_CEILING: u64 = 4096;
@@ -531,7 +585,9 @@ fn run(conn: &Connection, s: &mut EditorSession, call: &Call) -> Result<Answer, 
             if let Some(since) = since(conn, args, s.revision(), &snap)? {
                 return json(since);
             }
-            json(serde_json::to_value(&snap).map_err(|e| e.to_string())?)
+            let whole = serde_json::to_value(&snap).map_err(|e| e.to_string())?;
+            within_budget(&whole.to_string(), "The whole document", NARROWER)?;
+            json(whole)
         }
         "get_node" => {
             let id = required(args, "id")?;
@@ -560,7 +616,9 @@ fn run(conn: &Connection, s: &mut EditorSession, call: &Call) -> Result<Answer, 
                     i += 1;
                 }
             }
-            json(json!({ "nodes": nodes }))
+            let answer = json!({ "nodes": nodes });
+            within_budget(&answer.to_string(), "This subtree", NARROWER)?;
+            json(answer)
         }
         "list_children" => {
             let id = node(args, "id")?;
@@ -696,11 +754,22 @@ fn run(conn: &Connection, s: &mut EditorSession, call: &Call) -> Result<Answer, 
                     ondin_export::svg::svg(&s.doc, &s.resolved, page, None)
                 }
             };
+            within_budget(
+                &svg,
+                "The SVG",
+                "export one layer with `id`, or look with `export_png`",
+            )?;
             json(json!({ "svg": svg }))
         }
         "export_png" => {
             let id = node(args, "id")?;
-            let max = index(args, "max").unwrap_or(PNG_MAX).clamp(16, PNG_CEILING) as f64;
+            let max = index(args, "max").unwrap_or(PNG_MAX);
+            if max > PNG_CEILING {
+                return Err(format!(
+                    "`max` is at most {PNG_CEILING}; export a part with `id` to see it closer"
+                ));
+            }
+            let max = max.max(16) as f64;
             let png = match id {
                 Some(id) if !is_page(s, id) => {
                     let r = s
@@ -1031,6 +1100,51 @@ mod tests {
         assert_eq!(docs.session.doc.get(id).unwrap().name(), "Header");
         assert_eq!(docs.committed, 1);
         assert_eq!(docs.session.history.undo_depth(), 1);
+    }
+
+    /// Every listed tool that is not a verb reaches a handler: called with the
+    /// least its parameters accept, none is answered as no tool, which a table
+    /// tool missing from dispatch is (it falls through to the verbs). An unknown
+    /// name is refused as one before anything else.
+    ///
+    /// flip: `run` without its `get_bounds` arm → fails at `get_bounds`.
+    #[test]
+    fn every_listed_tool_is_dispatched() {
+        use ondin_core::verbs::ParamKind as K;
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let page = docs.session.doc.first_page().to_wire();
+        let least = |kind: K| match kind {
+            K::Node | K::Id(_) => json!(page),
+            K::Nodes => json!([page]),
+            K::Number | K::Index => json!(0),
+            K::Bool => json!(false),
+            K::Text => json!("x"),
+            K::Choice(words) => json!(words[0]),
+            K::Model("KitModeMap") => json!({}),
+            K::Model("DtcgFile") => json!("{}"),
+            K::Model(model) => ondin_core::verbs::example(model).unwrap_or(json!({})),
+        };
+        for tool in ondin_mcp::schema::TOOLS {
+            if tool.name == "use_document" {
+                continue;
+            }
+            let args: serde_json::Map<String, Value> = tool
+                .params
+                .iter()
+                .filter(|p| p.required)
+                .map(|p| (p.name.to_owned(), least(p.kind)))
+                .collect();
+            let out = call(&mut engine, &mut docs, 1, tool.name, Value::Object(args));
+            let text = format!("{:?}", out.content);
+            assert!(
+                !text.contains("no tool `") && !text.contains("No tool is called"),
+                "`{}` is not dispatched: {text}",
+                tool.name
+            );
+        }
+        let none = call(&mut engine, &mut docs, 1, "paint_it_red", json!({}));
+        assert!(format!("{:?}", none.content).contains("No tool is called"));
     }
 
     /// `set_selection` takes layers of the page shown, once each, and refuses

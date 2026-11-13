@@ -515,6 +515,10 @@ fn is_page(s: &EditorSession, id: NodeId) -> bool {
 /// The default longest side of `export_png`.
 const PNG_MAX: u64 = 1600;
 
+/// The most `export_png`'s `max` is taken at: a raster held in the person's
+/// window, where an unbounded one could exhaust its memory and lose every tab.
+const PNG_CEILING: u64 = 4096;
+
 fn run(conn: &Connection, s: &mut EditorSession, call: &Call) -> Result<Answer, String> {
     let args = &call.args;
     let json = |v: Value| Ok(Answer::Json(v));
@@ -527,7 +531,11 @@ fn run(conn: &Connection, s: &mut EditorSession, call: &Call) -> Result<Answer, 
             json(serde_json::to_value(&snap).map_err(|e| e.to_string())?)
         }
         "get_node" => {
-            let id = required(args, "id")?.to_wire();
+            let id = required(args, "id")?;
+            if s.doc.get(id).is_none() {
+                return Err(format!("no layer `{}`", id.to_wire()));
+            }
+            let id = id.to_wire();
             let snap = snapshot_of(s);
             if let Some(since) = since(conn, args, s.revision(), &snap)? {
                 return json(since);
@@ -552,11 +560,17 @@ fn run(conn: &Connection, s: &mut EditorSession, call: &Call) -> Result<Answer, 
             json(json!({ "nodes": nodes }))
         }
         "list_children" => {
+            let id = node(args, "id")?;
+            if let Some(id) = id
+                && s.doc.get(id).is_none()
+            {
+                return Err(format!("no layer `{}`", id.to_wire()));
+            }
             let snap = snapshot_of(s);
             if let Some(since) = since(conn, args, s.revision(), &snap)? {
                 return json(since);
             }
-            let Some(id) = node(args, "id")? else {
+            let Some(id) = id else {
                 let pages: Vec<Value> = snap
                     .pages
                     .iter()
@@ -649,6 +663,22 @@ fn run(conn: &Connection, s: &mut EditorSession, call: &Call) -> Result<Answer, 
                         .ok_or_else(|| format!("`{v}` is no layer"))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
+            // As a person can select: layers of the page shown, never the page
+            // itself or a kit's vendored component. The page is not switched,
+            // which would move the person's view.
+            if let Some(id) = ids
+                .iter()
+                .find(|id| **id == s.page || s.doc.page_of(**id) != Some(s.page))
+            {
+                return Err(format!(
+                    "`{}` is not a layer of the page the person is on (`{}`); a selection \
+                     never spans pages",
+                    id.to_wire(),
+                    s.page.to_wire()
+                ));
+            }
+            let mut seen = std::collections::HashSet::new();
+            let ids: Vec<NodeId> = ids.into_iter().filter(|id| seen.insert(*id)).collect();
             s.selection.set(ids);
             json(json!({}))
         }
@@ -667,7 +697,7 @@ fn run(conn: &Connection, s: &mut EditorSession, call: &Call) -> Result<Answer, 
         }
         "export_png" => {
             let id = node(args, "id")?;
-            let max = index(args, "max").unwrap_or(PNG_MAX).max(16) as f64;
+            let max = index(args, "max").unwrap_or(PNG_MAX).clamp(16, PNG_CEILING) as f64;
             let png = match id {
                 Some(id) if !is_page(s, id) => {
                     let r = s
@@ -765,6 +795,7 @@ fn write(
     args: &Value,
 ) -> Result<Answer, String> {
     let verb = ondin_core::verbs::find(tool).ok_or_else(|| format!("no tool `{tool}`"))?;
+    refuse_kit_vault(s, args)?;
     let mut args = args.clone();
     let base = args
         .as_object_mut()
@@ -795,6 +826,26 @@ fn write(
         answer["said"] = json!(said);
     }
     Ok(Answer::Json(answer))
+}
+
+/// Refuse a verb that would edit a kit's vendored component, which a kit
+/// instance's `component.main` names: the person can never select one, and an
+/// edit there would change every instance until the kit's next update undid it.
+/// `main` and `from` only read their layer, so they may name one.
+fn refuse_kit_vault(s: &EditorSession, args: &Value) -> Result<(), String> {
+    let mut ids = Vec::new();
+    for key in ["node", "other", "parent"] {
+        ids.extend(node(args, key).ok().flatten());
+    }
+    ids.extend(nodes(args, "nodes").ok().flatten().unwrap_or_default());
+    match ids.into_iter().find(|id| s.doc.in_vault(*id)) {
+        Some(id) => Err(format!(
+            "`{}` is a kit's component, which changes only when the kit does: edit it in the \
+             kit's own document and publish, or `make_local` the instance first",
+            id.to_wire()
+        )),
+        None => Ok(()),
+    }
 }
 
 /// Commit an agent's `tx` as one undo step named by `tool`, with the style
@@ -972,6 +1023,26 @@ mod tests {
         assert_eq!(docs.session.history.undo_depth(), 1);
     }
 
+    /// `set_selection` takes layers of the page shown, once each, and refuses
+    /// the page itself, leaving the selection as it was.
+    ///
+    /// flip: `set_selection` without its page check → fails at the page's
+    /// refusal.
+    #[test]
+    fn set_selection_takes_layers_of_the_page_shown() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let id = rect(&mut engine, &mut docs, 1, "Chip");
+        let set = |e: &mut Engine, d: &mut One, ids: Value| {
+            call(e, d, 1, "set_selection", json!({ "ids": ids }))
+        };
+        ok(&set(&mut engine, &mut docs, json!([id, id])));
+        assert_eq!(docs.session.selection.ids().len(), 1, "once each");
+        let page = docs.session.page.to_wire();
+        assert!(set(&mut engine, &mut docs, json!([page])).is_error);
+        assert_eq!(docs.session.selection.ids().len(), 1, "left as it was");
+    }
+
     /// A connection that never called closing is no client leaving, which
     /// `serve` would otherwise end on; one that called is.
     ///
@@ -1144,7 +1215,11 @@ mod tests {
     }
 
     /// The three table reads list what the verbs made: a variable with its
-    /// resolved value per mode, a style with its users, a main component.
+    /// resolved value per mode, a style with its users, a main component with
+    /// the properties it owns.
+    ///
+    /// flip: `components` listing properties for sets alone → fails at "a plain
+    /// main's properties are listed".
     #[test]
     fn the_lists_show_variables_styles_and_components() {
         let (mut engine, mut docs) = (Engine::default(), One::new());
@@ -1177,11 +1252,20 @@ mod tests {
             json!({ "nodes": [id] }),
         );
         let main = ok(&made)["created"][0].clone();
+        // A main in no set owns its properties, which `set_instance_property`
+        // then names.
+        let args = json!({ "node": id, "kind": "boolean", "name": "Shown" });
+        ok(&call(&mut engine, &mut docs, 1, "define_property", args));
         let comps = call(&mut engine, &mut docs, 1, "list_components", json!({}));
         let listed = ok(&comps)["components"].as_array().unwrap().clone();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0]["kind"], "main");
         assert_eq!(listed[0]["id"], main);
+        assert!(
+            listed[0]["properties"].to_string().contains("Shown"),
+            "a plain main's properties are listed: {}",
+            listed[0]
+        );
     }
 
     /// `outline_text` turns a text the session laid out into a path, through the

@@ -392,7 +392,12 @@ fn map_modes(s: &mut EditorSession, call: &Call) -> Result<Answer, String> {
     let mode = |v: &str| serde_json::from_value::<ModeId>(json!(v)).ok();
     for (from, to) in mapping {
         let from = mode(from)
-            .filter(|m| table.owner_of(*m).is_some() && modes.mode(*m).is_none())
+            .filter(|m| {
+                matches!(
+                    table.owner_of(*m),
+                    Some(ondin_core::variable::ModeOwner::Collection(_))
+                )
+            })
             .ok_or_else(|| format!("`{from}` is no mode of this document's own"))?;
         match to.as_str() {
             None if to.is_null() => {
@@ -755,6 +760,31 @@ mod tests {
                 .is_some_and(|n| n.parent() == Some(page)),
             "written to the file"
         );
+    }
+
+    /// A verb on the kit component an instance's `component.main` names is
+    /// refused, the vault left as it was.
+    ///
+    /// flip: `write` without `refuse_kit_vault` → fails at the refusal: the
+    /// rename lands on the vendored main.
+    #[test]
+    fn a_verb_on_a_kit_component_is_refused() {
+        let mut f = fixture("vault-edit");
+        let (e, d) = (&mut f.engine, &mut f.docs);
+        let s = Documents::session(d, &f.consumer).unwrap();
+        let instance = ondin_core::NodeId::from_wire(&f.instance).unwrap();
+        let main = s.doc.get(instance).and_then(|n| n.link()).unwrap();
+        assert!(s.doc.in_vault(main), "the fixture's main is vendored");
+        let name = s.doc.get(main).unwrap().name().to_owned();
+        let why = refused(
+            e,
+            d,
+            "set_name",
+            json!({ "node": main.to_wire(), "name": "Mine" }),
+        );
+        assert!(why.contains("kit's component"), "{why}");
+        let s = Documents::session(d, &f.consumer).unwrap();
+        assert_eq!(s.doc.get(main).unwrap().name(), name);
     }
 
     /// `map_kit_modes` maps the document's own mode onto a kit mode by id, `null`

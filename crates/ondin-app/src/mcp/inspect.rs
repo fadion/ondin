@@ -123,7 +123,11 @@ fn check_contrast(s: &EditorSession, args: &Value) -> Result<Answer, String> {
     let scope = nodes(args, "ids")?;
     let pages: Vec<NodeId> = match &scope {
         Some(ids) => {
+            if let Some(gone) = ids.iter().find(|i| doc.get(**i).is_none()) {
+                return Err(format!("no layer `{}`", gone.to_wire()));
+            }
             let mut pages: Vec<NodeId> = ids.iter().filter_map(|i| doc.page_of(*i)).collect();
+            pages.sort_unstable();
             pages.dedup();
             pages
         }

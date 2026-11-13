@@ -125,11 +125,16 @@ pub(super) fn components(doc: &Document) -> Value {
                     "description": node.description(),
                     "doc_link": node.doc_link(),
                 });
-                if set {
-                    entry["properties"] = serde_json::to_value(node.props()).unwrap_or(Value::Null);
-                } else if let Some(of) = ondin_core::variant::set_of(doc, id) {
-                    entry["set"] = json!(of.to_wire());
-                    entry["variant"] = json!(node.variant());
+                // The properties sit on their owner: the set, or a main in none.
+                match ondin_core::variant::set_of(doc, id).filter(|_| !set) {
+                    Some(of) => {
+                        entry["set"] = json!(of.to_wire());
+                        entry["variant"] = json!(node.variant());
+                    }
+                    None => {
+                        entry["properties"] =
+                            serde_json::to_value(node.props()).unwrap_or(Value::Null);
+                    }
                 }
                 out.push(entry);
             }

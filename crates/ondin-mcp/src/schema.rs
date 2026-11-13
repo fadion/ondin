@@ -84,7 +84,7 @@ pub static TOOLS: &[Tool] = &[
     },
     Tool {
         name: "find_like",
-        doc: "Layers like one: sharing its fills, strokes, font or effects; the same layer in each copy of its block (`matching`); or a main's or set's instances. The layer itself is listed too.",
+        doc: "Layers like one: sharing its fills, strokes, font or effects; the same layer in each copy of its block (`matching`); or a main's or set's instances. The layer itself is listed too, except by `instances`.",
         params: &[
             param("id", ParamKind::Node, true, "The layer to match."),
             param(
@@ -97,7 +97,7 @@ pub static TOOLS: &[Tool] = &[
     },
     Tool {
         name: "hit_test",
-        doc: "The layers under a point in page coordinates, topmost first.",
+        doc: "The layers under a point in page coordinates, topmost first, as a click picks: hidden and locked layers are passed over.",
         params: &[
             param("x", ParamKind::Number, true, "Page x."),
             param("y", ParamKind::Number, true, "Page y."),
@@ -143,7 +143,7 @@ pub static TOOLS: &[Tool] = &[
                 "max",
                 ParamKind::Index,
                 false,
-                "The longest side in pixels; 1600 when absent.",
+                "The longest side in pixels at most, up to 4096; 1600 when absent. A page is never drawn above 1×, a layer above 2×.",
             ),
         ],
     },
@@ -404,7 +404,7 @@ pub static TOOLS: &[Tool] = &[
         params: &[
             param(
                 "tokens",
-                ParamKind::Text,
+                ParamKind::Model("DtcgFile"),
                 true,
                 "The file's JSON, as text or as an object.",
             ),

@@ -123,6 +123,9 @@ fn save_version(
     client: &str,
     args: &Value,
 ) -> Result<Answer, String> {
+    // Refused before the save: a loose file is not written for a version it
+    // cannot keep.
+    entry(docs, path)?;
     docs.save(path)?;
     let entry = entry(docs, path)?;
     let root = docs.library().ok_or(super::kits::NO_LIBRARY)?.root.clone();

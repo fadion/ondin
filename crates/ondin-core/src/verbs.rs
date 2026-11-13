@@ -1081,9 +1081,14 @@ pub static VERBS: &[Verb] = &[
         run: |ctx, a| {
             let nodes = a.layers(ctx.doc, "nodes")?;
             if !build::can_frame(ctx.doc, &nodes) {
-                return Err(VerbError::Nothing(
-                    "a frame cannot go inside a boolean or a mask",
-                ));
+                let parents: std::collections::HashSet<NodeId> = nodes
+                    .iter()
+                    .filter_map(|n| ctx.doc.get(*n)?.parent())
+                    .collect();
+                return Err(VerbError::Nothing(match parents.len() {
+                    0 | 1 => "a frame cannot go inside a boolean or a mask",
+                    _ => "the layers have different parents; frame each parent's layers apart",
+                }));
             }
             let (tx, frame) = build::frame(ctx.doc, ctx.res, ctx.ids, &nodes)?;
             Ok(Done::made(tx, vec![frame]))
@@ -2804,7 +2809,7 @@ pub static VERBS: &[Verb] = &[
             req(
                 "into",
                 TEXT,
-                "the colour they become, `#rrggbbaa`, one the document uses",
+                "the colour they become, `#rrggbbaa`, one the document uses; a variable's colour binds them to it",
             ),
             opt(
                 "nodes",
@@ -2840,9 +2845,25 @@ pub static VERBS: &[Verb] = &[
                     .is_raw()
                     .then(|| census[i].color.to_rgba8().to_u8_array())
             };
-            let target = (0..census.len())
-                .find(|i| raw(*i) == Some(into))
-                .ok_or_else(|| a.invalid("into", "no paint in scope is this colour"))?;
+            // A variable that is this colour first, as Colour review's default
+            // target: the raw paints are then bound to it.
+            let bound: Vec<usize> = (0..census.len())
+                .filter(|i| {
+                    !census[*i].is_raw() && census[*i].color.to_rgba8().to_u8_array() == into
+                })
+                .collect();
+            let target = match bound.as_slice() {
+                [one] => *one,
+                [] => (0..census.len())
+                    .find(|i| raw(*i) == Some(into))
+                    .ok_or_else(|| a.invalid("into", "no paint in scope is this colour"))?,
+                _ => {
+                    return Err(a.invalid(
+                        "into",
+                        "several variables are this colour; bind the paints with `bind_variable`",
+                    ));
+                }
+            };
             let mut members = vec![target];
             members.extend(
                 (0..census.len())

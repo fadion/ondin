@@ -3791,3 +3791,38 @@ fn merge_colours_repaints_near_identical_colours() {
     assert_eq!(solid(a), solid(b), "both take `into`");
     assert_eq!(solid(b), [0x1f, 0x3a, 0x5f, 0xff]);
 }
+
+/// `merge_colours` into a colour a variable carries binds the raw paints to that
+/// variable, as Colour review's default target does.
+///
+/// flip: `merge_colours` matching `into` on raw paints alone → fails at the
+/// refusal, as no raw paint is that colour.
+#[test]
+fn merge_colours_into_a_bound_colour_binds_the_raw_paints() {
+    let (mut doc, mut ids, _) = blank();
+    let blue =
+        serde_json::to_value(ondin_core::Cell::Color(Color::from_rgb8(0x33, 0x66, 0xcc))).unwrap();
+    let fill = |r, g, b| {
+        serde_json::to_value(vec![Fill {
+            brush: Brush::Solid(Color::from_rgb8(r, g, b)).into(),
+            visible: true,
+        }])
+        .unwrap()
+    };
+    let script = json!([
+        { "verb": "add_variable", "args": { "kind": "color", "name": "brand/blue", "value": blue }, "as": "c" },
+        { "verb": "create_node", "args": { "parent": "@page", "kind": rect(40.0, 40.0) }, "as": "x" },
+        { "verb": "set_fills", "args": { "node": "@x", "fills": fill(0x33, 0x66, 0xcc) } },
+        { "verb": "bind_variable", "args": { "nodes": ["@x"], "field": { "fill": 0 }, "variable": "@c" } },
+        { "verb": "create_node", "args": { "parent": "@page", "kind": rect(40.0, 40.0) }, "as": "y" },
+        { "verb": "set_fills", "args": { "node": "@y", "fills": fill(0x34, 0x67, 0xcb) } },
+        { "verb": "merge_colours", "args": { "colours": ["#3467cbff"], "into": "#3366ccff" } },
+    ]);
+    let made = verbs::run_script(&mut doc, &mut ids, Lent::default(), &script)
+        .unwrap_or_else(|e| panic!("{e}"));
+    let y = NodeId::from_wire(&made[4][0]).unwrap();
+    assert!(
+        doc.get(y).unwrap().paint().fills[0].brush.var().is_some(),
+        "the raw paint is bound to the variable"
+    );
+}

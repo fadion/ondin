@@ -1283,7 +1283,10 @@ mod tests {
                 .collect::<Vec<_>>();
         }
         let all = texts.join("|");
-        assert!(all.contains("+2 calls"), "the fourth call on folds: {all}");
+        assert!(
+            texts.iter().any(|t| t == "+2 calls"),
+            "the fourth call on folds, its count said once: {all}"
+        );
         assert!(all.contains("Ask again"), "{all}");
         assert!(all.contains("14 s · 3.1k tokens"), "{all}");
         assert!(all.contains("Fill"), "the options draw as buttons: {all}");

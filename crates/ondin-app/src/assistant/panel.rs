@@ -13,8 +13,8 @@ use crate::ui;
 const MSG_GAP: f32 = 14.0;
 /// A tool row's height.
 const TOOL_H: f32 = 22.0;
-/// The head's height.
-const HEAD_H: f32 = 24.0;
+/// The head's height: its dropdown's.
+const HEAD_H: f32 = ui::CONTROL_H;
 /// The least the panel shrinks to: the head, a line of thread and the composer.
 const FLOOR_H: f32 = 2.0 * ui::RAIL_POPUP_PAD + HEAD_H + 10.0 + 40.0 + 10.0 + 96.0;
 /// A question's bubble at most this share of the thread's width.
@@ -26,6 +26,8 @@ const SEND_W: f32 = 26.0;
 /// Clear air between the panel's top and the canvas's: room to see what is
 /// being asked about.
 const TOP_AIR: f32 = 50.0;
+/// Above an empty thread's empty state: its rail siblings' air.
+const EMPTY_AIR: f32 = 40.0;
 
 /// What the panel asked for this frame.
 enum Act {
@@ -109,17 +111,20 @@ impl OndinApp {
             ui.spacing_mut().item_spacing.y = 10.0;
             self.assistant_head(ui, harness, seal.as_ref(), level, &mut acts);
             ui::card_rule(ui);
+            // Last frame's composer with the gap above it, so the thread leaves
+            // it exactly its room and the card's foot keeps the card's inset.
             let composer_id = ui.id().with("composer-h");
-            let composer_h: f32 = ui.data(|d| d.get_temp(composer_id)).unwrap_or(96.0);
-            let thread_h = (ui.available_height() - composer_h - 10.0).max(40.0);
+            let composer_h: f32 = ui.data(|d| d.get_temp(composer_id)).unwrap_or(106.0);
+            let thread_h = (ui.available_height() - composer_h).max(40.0);
             ui.allocate_ui(egui::vec2(inner, thread_h), |ui| {
                 ui.set_min_height(thread_h);
                 egui::ScrollArea::vertical()
                     .id_salt("assistant-thread")
                     .auto_shrink([false, false])
                     .stick_to_bottom(true)
+                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                     .show(ui, |ui| {
-                        ui.set_width(inner - 8.0);
+                        ui.set_width(inner);
                         self.assistant_thread(ui, now, &mut acts);
                     });
             });
@@ -268,6 +273,7 @@ impl OndinApp {
                     {
                         acts.push(Act::NewChat);
                     }
+                    ui.spacing_mut().interact_size.y = ui::CONTROL_H;
                     ui.spacing_mut().button_padding.y = 0.0;
                     let mut picked = level;
                     egui::ComboBox::from_id_salt("assistant-access")
@@ -295,14 +301,13 @@ impl OndinApp {
         ui.spacing_mut().item_spacing.y = MSG_GAP;
         let msgs = &self.assistant.msgs;
         if msgs.is_empty() {
-            ui.add_space(8.0);
-            ui.label(
-                egui::RichText::new(
-                    "Ask about the design in front of you. Attach layers with Ask the \
-                     assistant on their menu.",
-                )
-                .size(ui::SMALL_PT)
-                .color(theme::text::faint()),
+            ui.add_space(EMPTY_AIR);
+            ui::empty_state(
+                ui,
+                Some(icon::SPARKLE),
+                "Ask about the design in front of you",
+                "Attach layers with the button over them or Ask the assistant on their menu",
+                |_| {},
             );
             return;
         }
@@ -585,8 +590,10 @@ impl OndinApp {
         let chips = self.assistant.chips.clone();
         let mut draft = std::mem::take(&mut self.assistant.draft);
         let mut send = false;
+        // The text has no inset of its own (`TextArea::bare`), so the chips,
+        // the text and the hint share this one left edge.
         let framed = ui::field_frame()
-            .inner_margin(egui::Margin::same(8))
+            .inner_margin(egui::Margin::symmetric(ui::FIELD_PAD_X as i8, 8))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.spacing_mut().item_spacing.y = 8.0;
@@ -637,33 +644,40 @@ impl OndinApp {
                         }
                     }
                 }
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("Enter sends · Shift+Enter breaks the line")
-                            .size(ui::CAPTION_PT)
-                            .color(theme::text::faint()),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let (glyph, tip, state) = match running {
-                            true if stopping => {
-                                (icon::STOP, "Stopping…", ui::FieldButton::Disabled)
+                // The hint sits on the row's foot, level with the send button's
+                // bottom, so the space under it matches the space beside it.
+                let foot = egui::vec2(ui.available_width(), SEND_W);
+                ui.allocate_ui_with_layout(
+                    foot,
+                    egui::Layout::left_to_right(egui::Align::Max),
+                    |ui| {
+                        ui.label(
+                            egui::RichText::new("Enter sends · Shift+Enter breaks the line")
+                                .size(ui::CAPTION_PT)
+                                .color(theme::text::faint()),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Max), |ui| {
+                            let (glyph, tip, state) = match running {
+                                true if stopping => {
+                                    (icon::STOP, "Stopping…", ui::FieldButton::Disabled)
+                                }
+                                true => (icon::STOP, "Stop", ui::FieldButton::On),
+                                false if draft.trim().is_empty() => {
+                                    (icon::ARROW_UP, "Send (Enter)", ui::FieldButton::Disabled)
+                                }
+                                false => (icon::ARROW_UP, "Send (Enter)", ui::FieldButton::On),
+                            };
+                            let b = ui::field_button(ui, glyph, SEND_W, state).on_hover_text(tip);
+                            if b.clicked() {
+                                match running {
+                                    true if stopping => {}
+                                    true => acts.push(Act::Stop),
+                                    false => send = true,
+                                }
                             }
-                            true => (icon::STOP, "Stop", ui::FieldButton::On),
-                            false if draft.trim().is_empty() => {
-                                (icon::ARROW_UP, "Send (Enter)", ui::FieldButton::Disabled)
-                            }
-                            false => (icon::ARROW_UP, "Send (Enter)", ui::FieldButton::On),
-                        };
-                        let b = ui::field_button(ui, glyph, SEND_W, state).on_hover_text(tip);
-                        if b.clicked() {
-                            match running {
-                                true if stopping => {}
-                                true => acts.push(Act::Stop),
-                                false => send = true,
-                            }
-                        }
-                    });
-                });
+                        });
+                    },
+                );
             });
         let _ = framed;
         if send && !draft.trim().is_empty() {
@@ -720,13 +734,9 @@ impl OndinApp {
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
                                     ui.label(
-                                        egui::RichText::new(ui::count_as(
-                                            p.changes.len(),
-                                            "1 change",
-                                            &format!("{} changes", p.changes.len()),
-                                        ))
-                                        .size(ui::SMALL_PT - 0.5)
-                                        .color(theme::text::faint()),
+                                        egui::RichText::new(ui::count(p.changes.len(), "change"))
+                                            .size(ui::SMALL_PT - 0.5)
+                                            .color(theme::text::faint()),
                                     );
                                 },
                             );
@@ -897,21 +907,42 @@ fn level_tip(l: Level) -> &'static str {
     }
 }
 
-/// The speaker's name over an agent's turn, with the sparkle.
+/// The speaker's name over an agent's turn, in bold, with the sparkle.
 fn speaker_row(ui: &mut egui::Ui, speaker: &str) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
-        ui.label(
+        // The glyph's ink sits high in its box beside the name.
+        nudged_label(
+            ui,
             egui::RichText::new(icon::SPARKLE)
                 .font(theme::icon_font(ui::SMALL_PT + 0.5))
                 .color(color::accent_300()),
+            1.0,
         );
-        ui.label(
+        ui.label(ui::bold(
             egui::RichText::new(speaker)
                 .size(ui::SMALL_PT - 0.5)
-                .color(theme::text::dim()),
-        );
+                .color(theme::text::muted()),
+        ));
     });
+}
+
+/// A label in a centred row, drawn `dy` lower than the row would put it.
+fn nudged_label(ui: &mut egui::Ui, text: egui::RichText, dy: f32) {
+    let galley = egui::WidgetText::from(text).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        egui::TextStyle::Body,
+    );
+    // Twice the nudge taller, so centring the box moves the text by `dy`.
+    let size = galley.size() + egui::vec2(0.0, 2.0 * dy);
+    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+    ui.painter().galley(
+        rect.min + egui::vec2(0.0, 2.0 * dy),
+        galley,
+        theme::text::faint(),
+    );
 }
 
 /// The waiting line: the spinner, the stage and the seconds since the send.
@@ -932,10 +963,13 @@ fn stage_row(ui: &mut egui::Ui, words: &str, secs: f64, now: f64) {
                 .size(ui::CONTROL_PT)
                 .color(theme::text::dim()),
         );
-        ui.label(
+        // Smaller than the stage's words, so centring sets it high of their line.
+        nudged_label(
+            ui,
             egui::RichText::new(format!("{} s", secs.max(0.0) as u64))
                 .size(ui::SMALL_PT)
                 .color(theme::text::faint()),
+            1.0,
         );
     });
 }
@@ -1021,7 +1055,7 @@ fn fold_row(ui: &mut egui::Ui, more: usize) -> egui::Response {
     p.text(
         egui::pos2(rect.left() + 8.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
-        ui::count_as(more, "+1 call", &format!("+{more} calls")),
+        format!("+{}", ui::count(more, "call")),
         egui::FontId::proportional(ui::CAPTION_PT),
         theme::text::dim(),
     );

@@ -256,12 +256,14 @@ pub fn card_rule(ui: &mut egui::Ui) -> egui::Rect {
 
 /// The width of a [`close_button`]'s box.
 pub const CLOSE_BUTTON_W: f32 = 18.0;
+/// A [`close_button`]'s ×, and a removable [`layer_chip`]'s.
+pub const CLOSE_GLYPH_PT: f32 = 13.0;
 
 /// The × that closes a popover, a dialog or a card over the canvas: one box,
 /// one glyph size and the one tooltip, *Close*. Escape closes them all, so the
 /// tooltip does not name it.
 pub fn close_button(ui: &mut egui::Ui) -> egui::Response {
-    icon_button(ui, icon::X, CLOSE_BUTTON_W, 13.0, false, true).on_hover_text("Close")
+    icon_button(ui, icon::X, CLOSE_BUTTON_W, CLOSE_GLYPH_PT, false, true).on_hover_text("Close")
 }
 
 /// The head of a popover with no control to lead it (*Export settings*, *Repeat
@@ -1167,6 +1169,15 @@ pub fn menu_check_accel_width(
     let label_x = if ticks { MENU_LABEL_X } else { 8.0 };
     let row = label_x + widest + 8.0;
     (row + 2.0 * pad + 2.0 * MENU_BORDER).ceil().max(floor)
+}
+
+/// The weight bold chrome text takes on Inter's `wght` axis.
+pub const BOLD_WGHT: f32 = 600.0;
+
+/// `text` in bold, by Inter's weight axis: egui's `strong()` only recolours. A
+/// reply's speaker and its `**strong**` spans.
+pub fn bold(text: egui::RichText) -> egui::RichText {
+    text.variation("wght", BOLD_WGHT)
 }
 
 /// A small-caps section eyebrow (`LAYERS`, `TRANSFORM`, …).
@@ -2292,9 +2303,12 @@ pub struct TextArea<'a> {
     /// `Shift+Enter` breaks the line and a bare `Enter` is left for the caller
     /// (a composer's send); otherwise `Enter` breaks the line.
     pub enter_sends: bool,
-    /// No ground of its own: the caller's [`field_frame`] holds it with other
-    /// rows (a composer's chips and footer).
+    /// No ground and no inset of its own: the caller's [`field_frame`] holds
+    /// it with other rows (a composer's chips and footer), its text on their
+    /// left edge.
     pub bare: bool,
+    /// The most lines it grows to; past them it scrolls, without a bar.
+    pub max_rows: usize,
 }
 
 impl<'a> TextArea<'a> {
@@ -2306,9 +2320,13 @@ impl<'a> TextArea<'a> {
             id: None,
             enter_sends: false,
             bare: false,
+            max_rows: TEXT_AREA_MAX_ROWS,
         }
     }
 }
+
+/// The lines a [`text_area`] grows to before it scrolls.
+pub const TEXT_AREA_MAX_ROWS: usize = 15;
 
 /// A multi-line text field at the control type size: the field ground, the
 /// typing edge, and an edit that grows with its lines. A component's
@@ -2329,13 +2347,31 @@ pub fn text_area(ui: &mut egui::Ui, text: &mut String, area: TextArea<'_>) -> eg
             egui::Key::Enter,
         )));
     }
+    // Past `max_rows` the edit scrolls inside its ground; egui keeps the caret
+    // in view.
+    let row_h = ui.fonts_mut(|f| f.row_height(&egui::FontId::proportional(CONTROL_PT)));
+    let inset = match area.bare {
+        true => 0.0,
+        false => pad.frame.inner_margin.sum().y,
+    };
+    let scroller = egui::ScrollArea::vertical()
+        .id_salt(area.id.unwrap_or_else(|| ui.next_auto_id()).with("rows"))
+        .max_height(area.max_rows as f32 * row_h + inset)
+        .auto_shrink([false, true])
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden);
     if area.bare {
-        let edit = edit.frame(pad.frame).desired_width(ui.available_width());
-        return ui.add(edit);
+        let edit = edit
+            .frame(egui::Frame::NONE)
+            .desired_width(ui.available_width());
+        return scroller.show(ui, |ui| ui.add(edit)).inner;
     }
     let framed = field_frame()
         .inner_margin(egui::Margin::ZERO)
-        .show(ui, |ui| pad.add(ui, f32::INFINITY, edit));
+        .show(ui, |ui| {
+            scroller
+                .show(ui, |ui| pad.add(ui, f32::INFINITY, edit))
+                .inner
+        });
     let resp = framed.inner;
     if resp.has_focus() {
         typing_edge(ui, framed.response.rect);
@@ -2343,8 +2379,9 @@ pub fn text_area(ui: &mut egui::Ui, text: &mut String, area: TextArea<'_>) -> eg
     resp
 }
 
-/// A [`layer_chip`]'s height.
-pub const CHIP_H: f32 = 20.0;
+/// A [`layer_chip`]'s height: [`MENU_ROW_H`], a row's height, so a chip reads
+/// as a thing that can be pointed at rather than a tag.
+pub const CHIP_H: f32 = MENU_ROW_H;
 
 /// What a [`layer_chip`] shows.
 #[derive(Default)]
@@ -2366,14 +2403,15 @@ pub struct LayerChipOut {
     pub removed: bool,
 }
 
-/// A layer named in the assistant: an attached layer above the composer or in a
-/// question, or an id in a reply. The accent wash, [`CHIP_H`] tall, the frame
-/// glyph, the name, its number when it has one, and a × when removable.
+/// A layer attached in the assistant: above the composer or in a question. The
+/// accent wash, [`CHIP_H`] tall, the frame glyph, the name, its number when it
+/// has one, and a [`close_button`]-sized × when removable.
 pub fn layer_chip(ui: &mut egui::Ui, chip: LayerChip<'_>) -> LayerChipOut {
-    const PAD: f32 = 6.0;
-    const GAP: f32 = 4.0;
-    const X_W: f32 = 12.0;
-    let pt = SMALL_PT - 0.5;
+    const PAD: f32 = 8.0;
+    const GAP: f32 = 5.0;
+    const X_W: f32 = CLOSE_BUTTON_W;
+    const X_INSET: f32 = 3.0;
+    let pt = SMALL_PT;
     let font = egui::FontId::proportional(pt);
     let label = match chip.number {
         Some(n) => format!("{n} · {}", chip.name),
@@ -2385,8 +2423,9 @@ pub fn layer_chip(ui: &mut egui::Ui, chip: LayerChip<'_>) -> LayerChipOut {
     };
     let galley = ui.painter().layout_no_wrap(label, font, ink);
     let glyph_w = SMALL_PT;
-    let x_w = if chip.removable { GAP + X_W } else { 0.0 };
-    let w = PAD + glyph_w + GAP + galley.size().x + x_w + PAD;
+    // The × stands in the trailing inset, its box [`X_INSET`] from the edge.
+    let tail = if chip.removable { X_W + X_INSET } else { PAD };
+    let w = PAD + glyph_w + GAP + galley.size().x + tail;
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, CHIP_H), egui::Sense::click());
     let p = ui.painter();
     p.rect_filled(rect, 4.0, ground);
@@ -2422,7 +2461,7 @@ pub fn layer_chip(ui: &mut egui::Ui, chip: LayerChip<'_>) -> LayerChipOut {
     let mut removed = false;
     if chip.removable {
         let xr = egui::Rect::from_center_size(
-            egui::pos2(rect.right() - PAD - X_W / 2.0, rect.center().y),
+            egui::pos2(rect.right() - X_INSET - X_W / 2.0, rect.center().y),
             egui::vec2(X_W, X_W),
         );
         let xresp = ui.interact(xr, resp.id.with("x"), egui::Sense::click());
@@ -2434,7 +2473,7 @@ pub fn layer_chip(ui: &mut egui::Ui, chip: LayerChip<'_>) -> LayerChipOut {
             xr.center(),
             egui::Align2::CENTER_CENTER,
             icon::X,
-            theme::icon_font(CAPTION_PT),
+            theme::icon_font(CLOSE_GLYPH_PT),
             x_ink,
         );
         removed = xresp.on_hover_text("Remove").clicked();
@@ -5300,10 +5339,16 @@ const ACTION_GLYPH_PT: f32 = CONTROL_GLYPH_PT;
 /// status line's *Cancel*, the variables browser's offer to bind other uses.
 /// For an act that sits inside a line of words, where a button would outweigh it.
 pub fn word_link(ui: &mut egui::Ui, label: &str, quiet: bool) -> egui::Response {
+    word_link_pt(ui, label, quiet, SMALL_PT)
+}
+
+/// [`word_link`] at `pt`, for a link inside prose of that size: a layer named
+/// in the assistant's reply.
+pub fn word_link_pt(ui: &mut egui::Ui, label: &str, quiet: bool, pt: f32) -> egui::Response {
     let word = ui.fonts_mut(|f| {
         f.layout_no_wrap(
             label.to_owned(),
-            egui::FontId::proportional(SMALL_PT),
+            egui::FontId::proportional(pt),
             egui::Color32::PLACEHOLDER,
         )
     });
@@ -12117,5 +12162,59 @@ mod split_button_tests {
         assert_eq!(ink(&word(&out.shapes, "Merge")), color::accent_ink());
         let split = split.unwrap();
         assert_eq!(split.width() - SPLIT_CARET_W, plain.width(), "the same air");
+    }
+
+    /// `bold` reaches Inter's weight axis: the same word lays out wider.
+    /// flip: `bold` returning its text unchanged → fails at the comparison.
+    #[test]
+    fn bold_text_is_heavier() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut widths = (0.0, 0.0);
+        for _ in 0..2 {
+            let _ = ctx.run_ui(Default::default(), |ui| {
+                let w = |rt: egui::RichText| {
+                    egui::WidgetText::from(rt)
+                        .into_galley(ui, None, f32::INFINITY, egui::TextStyle::Body)
+                        .size()
+                        .x
+                };
+                let plain = egui::RichText::new("Claude").size(SMALL_PT);
+                widths = (w(plain.clone()), w(bold(plain)));
+            });
+        }
+        assert!(widths.1 > widths.0, "bold is wider: {widths:?}");
+    }
+
+    /// A `text_area` grows with its lines up to `max_rows`, then scrolls.
+    /// flip: `text_area` without its scroll area's `max_height` → fails at the cap.
+    #[test]
+    fn a_text_area_stops_growing_at_its_last_row() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let height = |lines: usize| {
+            let mut text = vec!["line"; lines].join("\n");
+            let mut h = 0.0;
+            for _ in 0..3 {
+                let _ = ctx.run_ui(Default::default(), |ui| {
+                    let mut area = TextArea::new("", 2);
+                    area.bare = true;
+                    area.id = Some(egui::Id::new(("area", lines)));
+                    let top = ui.cursor().top();
+                    text_area(ui, &mut text, area);
+                    h = ui.cursor().top() - top;
+                });
+            }
+            h
+        };
+        assert!(height(6) > height(3), "it grows with its lines");
+        let row = ctx.fonts_mut(|f| f.row_height(&egui::FontId::proportional(CONTROL_PT)));
+        let cap = TEXT_AREA_MAX_ROWS as f32 * row;
+        let long = height(40);
+        assert!(
+            long <= cap + ctx.global_style().spacing.item_spacing.y + 0.5,
+            "40 lines stop at {TEXT_AREA_MAX_ROWS} rows: {long} vs {cap}"
+        );
+        assert!(long > cap - row, "and fill them: {long} vs {cap}");
     }
 }

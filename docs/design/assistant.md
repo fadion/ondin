@@ -213,7 +213,7 @@ against an eager model, not a boundary against a hostile one. The seal's sentenc
   from Settings, which come last and so win.
 - **Answers are short**, since the panel is narrow: one or two sentences, the answer first, no
   preamble, recap or offer of more. A choice is at most three options in an ` ```options ` block,
-  one short line each, and a question. A layer is named by its id, so it renders as a chip. A table
+  one short line each, and a question. A layer is named by its id, so it renders as a link. A table
   or code only when asked for one or when the answer is code.
 - **The prompt goes in the harness's system-prompt flag** where it has one (Claude Code's
   `--append-system-prompt`), so it holds on every turn and survives the harness compacting its
@@ -260,7 +260,9 @@ against an eager model, not a boundary against a hostile one. The seal's sentenc
 - **While the panel is open, an attached layer wears a dashed accent outline** 5 outside it; its
   number is on its lit ask button. A closed panel leaves no outline. Hovering a chip outlines its
   layer; clicking one selects it and zooms to it.
-- **The agent's reply can name layers.** A layer id in a reply renders as the same chip.
+- **The agent's reply can name layers.** A layer id in a reply the document holds renders as a
+  link naming the layer, in the accent; hovering it outlines the layer and clicking it selects it
+  and zooms to it, as a chip does.
 
 ## 5. Settings
 
@@ -311,7 +313,8 @@ layers being asked about, and is one more kind of surface.
   *New chat* (a plus). *New chat* clears the thread at once, without asking, and ends a running
   turn.
 - **The thread:** the person's turns right-aligned; the agent's full width, under the speaker name
-  the turn was written by, kept with the turn.
+  the turn was written by, in bold and kept with the turn. An empty thread shows the app's empty
+  state saying how to attach layers. It scrolls with no bar.
 - **A turn is never blank while it waits.** The agent's turn takes its place at the send, with
   `ui::paint_spinner`, *Starting Claude Code…* until the harness's first event, then *Thinking…*
   until the first text or tool call, and again once a tool has finished and no text has followed.
@@ -326,8 +329,10 @@ layers being asked about, and is one more kind of surface.
   cut short. After a turn's third call the rest fold into *+N calls*.
 - **Under each finished turn:** its time and tokens, *Copy*, and on the last turn *Regenerate*
   (`icon::ARROW_CLOCKWISE`), which drops that turn and asks again.
-- **The composer** is a `ui::text_area`: Enter sends, Shift+Enter breaks the line, and the send
-  button becomes *Stop* (`icon::STOP`) while a turn runs. `Ctrl+↑`/`Ctrl+↓` step through earlier
+- **The composer** is a bare `ui::text_area` in a field ground with the chips above it and the
+  hint and send button on its foot, all on one left edge; it grows to 15 lines, then scrolls.
+  Enter sends, Shift+Enter breaks the line, and the send button becomes *Stop* (`icon::STOP`)
+  while a turn runs. `Ctrl+↑`/`Ctrl+↓` step through earlier
   questions.
 - **When it cannot send**, the composer is replaced by the reason, and off wins over every other:
   the assistant is off (*Open settings*); private mode; the document is unsaved (*Save the document

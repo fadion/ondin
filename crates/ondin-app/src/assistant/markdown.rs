@@ -1,8 +1,8 @@
 //! A reply's markdown: parsed into blocks, drawn into the panel. Only what a
-//! short answer uses: paragraphs, headings (drawn as strong lines), lists,
+//! short answer uses: paragraphs, headings (drawn as bold lines), lists,
 //! tables, code blocks with a language bar, and the ` ```options ` block, which
-//! draws as buttons. A layer id in prose (`4:31`) draws as a chip when the
-//! document has that layer.
+//! draws as buttons. A layer id in prose (`831ddff3fec146a3:573`) draws as a
+//! link naming the layer when the document has it.
 
 use crate::theme::{self, color, icon};
 use crate::ui;
@@ -214,8 +214,10 @@ pub(crate) fn inline(src: &str) -> Vec<Span> {
     out
 }
 
-/// Split text at layer ids (`12:345`, bounded by non-word characters): the
-/// pieces in order, `true` for an id.
+/// Split text at layer ids (an actor in hex, a colon, a sequence number:
+/// `831ddff3fec146a3:573`, bounded by non-word characters): the pieces in
+/// order, `true` for an id. A candidate the document does not hold, such as a
+/// time, stays prose when drawn.
 pub(crate) fn ids_in(text: &str) -> Vec<(&str, bool)> {
     let b = text.as_bytes();
     let mut out = Vec::new();
@@ -223,9 +225,9 @@ pub(crate) fn ids_in(text: &str) -> Vec<(&str, bool)> {
     let mut i = 0;
     while i < b.len() {
         let word_before = i > 0 && (b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b':');
-        if b[i].is_ascii_digit() && !word_before {
+        if b[i].is_ascii_hexdigit() && !word_before {
             let mut j = i;
-            while j < b.len() && b[j].is_ascii_digit() {
+            while j < b.len() && b[j].is_ascii_hexdigit() {
                 j += 1;
             }
             if j < b.len() && b[j] == b':' && b.get(j + 1).is_some_and(u8::is_ascii_digit) {
@@ -338,7 +340,8 @@ pub(crate) fn show(ui: &mut egui::Ui, blocks: &[Block], look: &Look<'_>, acts: &
     }
 }
 
-/// A paragraph's spans, wrapped, with layer ids drawn as chips.
+/// A paragraph's spans, wrapped, with each layer id the document holds drawn
+/// as a link naming the layer.
 fn spans_row(
     ui: &mut egui::Ui,
     spans: &[Span],
@@ -351,23 +354,18 @@ fn spans_row(
         for s in spans {
             let (text, base): (&str, fn(String) -> egui::RichText) = match s {
                 Span::Text(t) => (t, egui::RichText::new),
-                Span::Strong(t) => (t, |t| egui::RichText::new(t).strong()),
+                Span::Strong(t) => (t, |t| ui::bold(egui::RichText::new(t))),
                 Span::Em(t) => (t, |t| egui::RichText::new(t).italics()),
                 Span::Code(t) => (t, |t| egui::RichText::new(t).monospace()),
             };
             for (piece, is_id) in ids_in(text) {
                 if is_id && let Some(name) = (look.layer)(piece) {
-                    let out = ui::layer_chip(
-                        ui,
-                        ui::LayerChip {
-                            name: &name,
-                            ..ui::LayerChip::default()
-                        },
-                    );
-                    if out.resp.hovered() {
+                    let resp = ui::word_link_pt(ui, &name, false, ui::CONTROL_PT)
+                        .on_hover_text("Select and zoom to it");
+                    if resp.hovered() {
                         acts.push(Act::Hover(piece.to_owned()));
                     }
-                    if out.resp.clicked() {
+                    if resp.clicked() {
                         acts.push(Act::Select(piece.to_owned()));
                     }
                     continue;
@@ -376,7 +374,7 @@ fn spans_row(
                 let ink = if strong_ink { color::text() } else { look.ink };
                 let mut rt = base(piece.to_owned()).size(ui::CONTROL_PT).color(ink);
                 if strong {
-                    rt = rt.strong();
+                    rt = ui::bold(rt);
                 }
                 ui.label(rt);
             }
@@ -546,5 +544,15 @@ mod tests {
         );
         assert_eq!(ids_in("ratio 1:2:3 x"), vec![("ratio 1:2:3 x", false)]);
         assert_eq!(ids_in("v4:31"), vec![("v4:31", false)]);
+        // flip: `ids_in` scanning decimal digits for the actor → fails here.
+        assert_eq!(
+            ids_in("fills 831ddff3fec146a3:771 blue"),
+            vec![
+                ("fills ", false),
+                ("831ddff3fec146a3:771", true),
+                (" blue", false)
+            ],
+            "the actor is hex"
+        );
     }
 }

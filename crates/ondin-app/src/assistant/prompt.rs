@@ -56,7 +56,8 @@ pub(crate) fn system(level: Level, instructions: &str, replay: &str) -> String {
          question, no summary, no offer of more help.\n\
          When there is a choice to make, give at most three options in an ```options block, \
          one short line each, and ask which.\n\
-         Name a layer by its id (like 4:31) so it shows as a chip; don't describe where it is.\n\
+         Name a layer by its id, written as the tools give it, so it shows as a link to the \
+         layer; don't describe where it is.\n\
          Use a table or code only when asked for one, or when the answer is code.\n\
          Go longer only when the person asks for detail or an explanation.",
     );

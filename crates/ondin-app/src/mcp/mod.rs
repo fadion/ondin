@@ -1158,6 +1158,14 @@ fn write(
         let base = base.as_u64().ok_or("`base_rev` must be a `rev`")?;
         stale(conn, s, base, &done.tx)?;
     }
+    // A layer that was there before is not one the call created: `make_component`
+    // answers a frame it turned into a main as `main` alone.
+    let created: Vec<Value> = done
+        .created
+        .iter()
+        .filter(|id| s.doc.get(**id).is_none())
+        .map(|id| json!(id.to_wire()))
+        .collect();
     commit(s, client, verb.name, done.tx)?;
     // A picture's own size, which decides what aspect `fit` and `crop` keep.
     let pixels = match verb.name {
@@ -1168,10 +1176,18 @@ fn write(
             .map(|e| [e.width, e.height]),
         _ => None,
     };
-    let mut answer = json!({
-        "created": done.created.iter().map(|i| i.to_wire()).collect::<Vec<_>>(),
-        "made": done.made,
-    });
+    let mut answer = json!({ "created": created });
+    if let Some(made) = done.made {
+        answer[made_key(verb.name)] = match verb.name {
+            "define_property" => json!(property_name(s, &args, &made).unwrap_or(made)),
+            _ => json!(made),
+        };
+    }
+    if verb.name == "make_component"
+        && let Some(main) = done.created.first()
+    {
+        answer["main"] = json!(main.to_wire());
+    }
     if let Some(said) = done.said {
         answer["said"] = json!(said);
     }
@@ -1198,6 +1214,30 @@ fn write(
         answer["pixel_size"] = json!(px);
     }
     Ok(Answer::Json(answer))
+}
+
+/// The key a write answers what else it made under, named for what it is.
+fn made_key(verb: &str) -> &'static str {
+    match verb {
+        "add_image" => "image",
+        "add_variable" => "variable",
+        "add_mode" => "mode",
+        "add_collection" | "duplicate_collection" => "collection",
+        "add_style" => "style",
+        "define_property" => "property",
+        _ => "made",
+    }
+}
+
+/// The name of the property `define_property` just made, whose id is `item`:
+/// `set_instance_property` takes a property by its name.
+fn property_name(s: &EditorSession, args: &Value, item: &str) -> Option<String> {
+    let owner = ondin_core::variant::owner_above(&s.doc, node(args, "node").ok()??)?;
+    let props = s.doc.get(owner)?.props();
+    props
+        .iter()
+        .find(|p| p.id.0.to_wire() == item)
+        .map(|p| p.name.clone())
 }
 
 /// Each layer of `tree` the caller named, by the `/`-joined names of it and its
@@ -1275,7 +1315,8 @@ fn batch(
         if let Some(label) = step.get("as").and_then(Value::as_str) {
             let first = answer["created"]
                 .get(0)
-                .or_else(|| answer.get("made"))
+                .or_else(|| answer.get("main"))
+                .or_else(|| answer.get(made_key(tool)))
                 .and_then(Value::as_str)
                 .map(str::to_owned);
             if let Some(first) = first {
@@ -1975,7 +2016,7 @@ mod tests {
         open(&mut engine, &mut docs, 1);
         let args = json!({ "bytes": base64(&png) });
         let out = call(&mut engine, &mut docs, 1, "add_image", args);
-        assert!(ok(&out)["made"].is_string());
+        assert!(ok(&out)["image"].is_string());
         assert_eq!(ok(&out)["pixel_size"], json!([3, 2]), "the size");
     }
 

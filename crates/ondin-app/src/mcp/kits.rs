@@ -598,7 +598,7 @@ mod tests {
             d,
             "add_variable",
             json!({ "kind": "color", "name": "ink" }),
-        )["made"]
+        )["variable"]
             .clone();
         let kind = ondin_core::verbs::example("NodeKind").unwrap();
         let rect = ok(
@@ -631,7 +631,7 @@ mod tests {
         let consumer = path(&ok(e, d, "create_document", json!({ "name": "Consumer" })));
         let page =
             ok(e, d, "use_document", json!({ "document": consumer }))["pages"][0]["id"].clone();
-        let night = ok(e, d, "add_mode", json!({ "name": "Night" }))["made"]
+        let night = ok(e, d, "add_mode", json!({ "name": "Night" }))["mode"]
             .as_str()
             .unwrap()
             .to_owned();

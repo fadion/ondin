@@ -364,7 +364,7 @@ pub static TOOLS: &[Tool] = &[
     },
     Tool {
         name: "set",
-        doc: "Set properties of layers in one undo step, each as its own setter takes it: name, visible, locked, opacity, blend, clip, fills, strokes, effects, exports, display, item, insets, text, text_style, paragraph, block, transform, geometry, element, link, size {width, height}, and at [x, y], the layer's place in its parent.",
+        doc: "Set properties of layers in one undo step, each as its own setter takes it: name, visible, locked, opacity, blend, clip, fills, strokes, effects, exports, display, item, insets, text, text_style, paragraph, block, transform, geometry, element, link, size {width, height}, and at [x, y], its box's left and top in its parent.",
         params: &[
             param("nodes", ParamKind::Nodes, true, "The layers."),
             param(

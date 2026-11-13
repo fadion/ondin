@@ -1253,7 +1253,8 @@ const SET_PROPS: &[(&str, &str, bool, &str)] = &[
 
 /// `set`: each property through its own setter, as a [`batch`] named `set`, so
 /// one call writes what a handful of setters would and lands as one undo step.
-/// `size` and `at` follow the rest, so a move lands where the new size leaves it.
+/// `size` and `at` follow the rest, so a move lands where the new size leaves it;
+/// `at` is measured once they have landed ([`placed_at`]).
 fn set(
     conn: &Connection,
     s: &mut EditorSession,
@@ -1307,33 +1308,47 @@ fn set(
             step("set_size", json!({ "node": id, "width": w, "height": h }));
         }
     }
-    if let Some(at) = props.get("at") {
-        let Some([x, y]) = at
-            .as_array()
-            .and_then(|a| a.iter().map(Value::as_f64).collect::<Option<Vec<_>>>())
-            .and_then(|a| <[f64; 2]>::try_from(a).ok())
-        else {
-            return Err("`at` is [x, y], the place in the layer's parent".into());
-        };
-        for id in &ids {
-            let t = s
-                .doc
-                .get(*id)
-                .ok_or_else(|| format!("no layer `{}`", id.to_wire()))?
-                .transform()
-                .as_coeffs();
-            step(
-                "set_transform",
-                json!({ "node": id.to_wire(), "transform": [t[0], t[1], t[2], t[3], x, y] }),
-            );
+    let at = match props.get("at") {
+        None => None,
+        Some(at) => Some(
+            at.as_array()
+                .and_then(|a| a.iter().map(Value::as_f64).collect::<Option<Vec<_>>>())
+                .and_then(|a| <[f64; 2]>::try_from(a).ok())
+                .ok_or("`at` is [x, y], the left and top of the layer's box in its parent")?,
+        ),
+    };
+    let batched = |steps: Vec<Value>| {
+        let mut batched = json!({ "steps": steps });
+        if let Some(base) = args.get("base_rev") {
+            batched["base_rev"] = base.clone();
+        }
+        batched
+    };
+    let depth = s.history.undo_depth();
+    if !steps.is_empty() {
+        batch(conn, s, client, &batched(steps))?;
+    }
+    // Measured after the rest landed, so the box is the one the new size left.
+    if let Some([x, y]) = at {
+        let placed = ids
+            .iter()
+            .map(|id| placed_at(s, *id, x, y))
+            .collect::<Result<Vec<_>, _>>()
+            .and_then(|steps| batch(conn, s, client, &batched(steps)));
+        if let Err(why) = placed {
+            if s.history.undo_depth() > depth {
+                s.take_back();
+            }
+            return Err(why);
         }
     }
-    let mut batched = json!({ "steps": steps });
-    if let Some(base) = args.get("base_rev") {
-        batched["base_rev"] = base.clone();
+    let made = s.history.undo_depth().saturating_sub(depth);
+    if made > 1 {
+        s.history.join_last(made);
     }
-    batch(conn, s, client, &batched)?;
-    if let Some(note) = s.history.current_note_mut() {
+    if made > 0
+        && let Some(note) = s.history.current_note_mut()
+    {
         note.label = "set".into();
         note.origin = ondin_core::Origin::Mcp {
             client: client.to_owned(),
@@ -1343,6 +1358,24 @@ fn set(
     let mut written: Vec<&str> = props.keys().map(String::as_str).collect();
     written.sort_unstable();
     Ok(Answer::Json(json!({ "set": written })))
+}
+
+/// The `set_transform` step that puts the left and top of `id`'s box at `x`, `y`
+/// in its parent's space, for every kind: the box it is drawn with (a group's is
+/// its children's), moved by the difference so it keeps its rotation and scale.
+/// A layer with no box is placed by its origin.
+fn placed_at(s: &EditorSession, id: NodeId, x: f64, y: f64) -> Result<Value, String> {
+    let n = s
+        .doc
+        .get(id)
+        .ok_or_else(|| format!("no layer `{}`", id.to_wire()))?;
+    let local = s.resolved.used_local(&s.doc, id).unwrap_or(n.transform());
+    let corner = ondin_core::query::local_box(&s.doc, &s.resolved, id)
+        .map(|b| ondin_core::geometry::transform_rect(local, b).origin())
+        .unwrap_or(local * ondin_core::kurbo::Point::ZERO);
+    let moved = ondin_core::kurbo::Affine::translate((x - corner.x, y - corner.y)) * n.transform();
+    Ok(json!({ "tool": "set_transform",
+        "args": { "node": id.to_wire(), "transform": moved.as_coeffs() } }))
 }
 
 /// `describe_tools`: the full definition of each tool named in `names`, or of
@@ -1936,6 +1969,65 @@ mod tests {
             json!({ "nodes": [id], "props": { "colour": "#fff" } }),
         );
         assert!(bad.is_error, "an unknown property is refused");
+    }
+
+    /// `set`'s `at` puts a group's box where it puts a layer's: its left and top in
+    /// the parent, wherever its children sat, not the group's transform moved there.
+    ///
+    /// flip: `placed_at` writing `x`, `y` as the transform's offset → fails at "the
+    /// box's corner".
+    #[test]
+    fn set_places_a_groups_box_by_its_corner() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let a = rect(&mut engine, &mut docs, 1, "A");
+        let b = rect(&mut engine, &mut docs, 1, "B");
+        for (id, at) in [(&a, [100.0, 50.0]), (&b, [160.0, 80.0])] {
+            let props = json!({ "at": at });
+            ok(&call(
+                &mut engine,
+                &mut docs,
+                1,
+                "set",
+                json!({ "nodes": [id], "props": props }),
+            ));
+        }
+        let made = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "group",
+            json!({ "nodes": [a, b] }),
+        );
+        let group = ok(&made)["created"][0].clone();
+        let gid = NodeId::from_wire(group.as_str().unwrap()).unwrap();
+        let aid = NodeId::from_wire(&a).unwrap();
+        let before = docs.session.resolved.world_bounds(aid).unwrap();
+        let box_of = |docs: &One| {
+            let s = &docs.session;
+            let local = s.resolved.used_local(&s.doc, gid).unwrap();
+            let b = ondin_core::query::local_box(&s.doc, &s.resolved, gid).unwrap();
+            ondin_core::geometry::transform_rect(local, b).origin()
+        };
+        assert_eq!(
+            box_of(&docs),
+            (100.0, 50.0).into(),
+            "the group spans its children"
+        );
+        ok(&call(
+            &mut engine,
+            &mut docs,
+            1,
+            "set",
+            json!({ "nodes": [group], "props": { "at": [10.0, 20.0] } }),
+        ));
+        let after = docs.session.resolved.world_bounds(aid).unwrap();
+        assert_eq!(
+            (after.x0 - before.x0, after.y0 - before.y0),
+            (-90.0, -30.0),
+            "the box's corner moved to [10, 20]"
+        );
+        assert_eq!(box_of(&docs), (10.0, 20.0).into());
     }
 
     /// `call` answers as the tool it names, listed or not, and never names itself;

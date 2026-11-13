@@ -1445,7 +1445,8 @@ const SET_GUESSES: &[(&str, &str)] = &[
 /// one call writes what a handful of setters would and lands as one undo step.
 /// `size`, `rotation` and `at` follow the rest in that order, each measured once
 /// the ones before have landed, so a move lands where the new size and turn
-/// leave the box ([`placed_at`]).
+/// leave the box ([`placed_at`]). New fills on a text clear its style's colour,
+/// which would draw over them; a call that changes nothing answers `unchanged`.
 fn set(
     conn: &Connection,
     s: &mut EditorSession,
@@ -1516,6 +1517,27 @@ fn set(
             }
         }
     }
+    // A text draws in its style's colour over its fills, so new fills clear it.
+    let given_colour = canon
+        .get("text_style")
+        .is_some_and(|st| st.get("color").is_some());
+    if canon.contains_key("fills") && !given_colour {
+        let coloured: Vec<Value> = ids
+            .iter()
+            .filter(|id| {
+                s.doc.get(**id).is_some_and(|n| {
+                    matches!(n.kind(), ondin_core::NodeKind::Text { style, .. } if style.color.is_some())
+                })
+            })
+            .map(|id| json!(id.to_wire()))
+            .collect();
+        if !coloured.is_empty() {
+            step(
+                "set_text_style",
+                json!({ "nodes": coloured, "style": { "color": null } }),
+            );
+        }
+    }
     let batched = |steps: Vec<Value>| {
         let mut batched = json!({ "steps": steps });
         if let Some(base) = args.get("base_rev") {
@@ -1581,6 +1603,12 @@ fn set(
             client: client.to_owned(),
             tool: "set".into(),
         };
+    }
+    if made == 0 {
+        // A write that lands nothing must not read as one that did.
+        return Ok(Answer::Json(
+            json!({ "set": [], "unchanged": written, "note": "the layers already had these values" }),
+        ));
     }
     Ok(Answer::Json(json!({ "set": written })))
 }
@@ -2591,6 +2619,51 @@ mod tests {
             json!({ "nodes": [id], "props": { "colour": "#fff" } }),
         );
         assert!(bad.is_error, "an unknown property is refused");
+    }
+
+    /// `set`'s fill on a text whose style carries a colour clears that colour so
+    /// the fill is what draws, and a `set` that changes nothing answers `unchanged`.
+    ///
+    /// flip: `set` skipping its `set_text_style` step → fails at "the style's colour
+    /// is cleared"; `set` answering what it was given when nothing landed → fails
+    /// at "nothing set".
+    #[test]
+    fn set_fill_recolours_a_text_and_a_no_op_says_so() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let page = docs.session.doc.first_page().to_wire();
+        let tree = json!({ "fills": ["#12352a"], "kind": { "Text": { "content": "Hi",
+            "sizing": "Auto", "style": { "color": "#ffffff" } } } });
+        let made = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "insert_subtree",
+            json!({ "parent": page, "tree": tree }),
+        );
+        let id = ok(&made)["created"][0].as_str().unwrap().to_owned();
+        let nid = NodeId::from_wire(&id).unwrap();
+        let colour = |docs: &One| match docs.session.doc.get(nid).unwrap().kind() {
+            ondin_core::NodeKind::Text { style, .. } => style.color,
+            _ => unreachable!(),
+        };
+        assert!(colour(&docs).is_some(), "the fixture's style has a colour");
+        let set = |engine: &mut Engine, docs: &mut One| {
+            call(
+                engine,
+                docs,
+                1,
+                "set",
+                json!({ "nodes": [id], "props": { "fill": "#12352a" } }),
+            )
+        };
+        let first = set(&mut engine, &mut docs);
+        assert_eq!(ok(&first)["set"], json!(["fill"]));
+        assert_eq!(colour(&docs), None, "the style's colour is cleared");
+        let again = set(&mut engine, &mut docs);
+        let answer = ok(&again);
+        assert_eq!(answer["set"], json!([]), "nothing set");
+        assert_eq!(answer["unchanged"], json!(["fill"]));
     }
 
     /// `set`'s `at` puts a group's box where it puts a layer's: its left and top in

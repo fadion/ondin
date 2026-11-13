@@ -4751,10 +4751,13 @@ fn tree_ops(
 }
 
 /// Layer `id` and the layers inside it as a [`Tree`], the shape `insert_subtree`
-/// takes and the setters write: its stored kind with a text's runs, every fill and
-/// stroke with the hidden ones, framing, align, dash, cap and join, its effects and
-/// exports, each field present only where it differs from a new layer's. Item ids
-/// are left out, as a caller never writes one. `None` for no such layer.
+/// takes and the setters write: its kind with a text's runs, every fill and stroke
+/// with the hidden ones, its effects and exports, each field only where it differs
+/// from a new layer's, and no item ids. A binding a paint, stroke, effect or layout
+/// item carries travels in it; any other bound field (size, corners, text, gaps,
+/// padding, flow, visibility, opacity) is written as drawn, unbound. Only what
+/// `Tree` holds is read: no styles, modes, width queries, pivot, element, link or
+/// component state. `None` for no such layer.
 pub fn tree(doc: &Document, id: NodeId) -> Option<Value> {
     fn values<T: serde::Serialize>(list: &[Keyed<T>]) -> Value {
         serde_json::to_value(list.iter().map(|k| &k.value).collect::<Vec<_>>()).unwrap_or_default()
@@ -4764,7 +4767,14 @@ pub fn tree(doc: &Document, id: NodeId) -> Option<Value> {
     let mut put = |k: &str, v: Value| {
         out.insert(k.to_owned(), v);
     };
-    put("kind", serde_json::to_value(n.kind()).unwrap_or_default());
+    // A bound field's stored literal is a placeholder, so each is written as drawn.
+    let mut kind = doc
+        .resolved_kind(id)
+        .map_or_else(|| n.kind().clone(), std::borrow::Cow::into_owned);
+    if let Some(radii) = kind.corner_radii().and_then(|r| doc.resolve_corners(id, r)) {
+        kind.set_corner_radii(radii);
+    }
+    put("kind", serde_json::to_value(&kind).unwrap_or_default());
     put("name", Value::from(n.name()));
     if n.transform() != Affine::IDENTITY {
         put(
@@ -4772,14 +4782,15 @@ pub fn tree(doc: &Document, id: NodeId) -> Option<Value> {
             serde_json::to_value(n.transform()).unwrap_or_default(),
         );
     }
-    if !n.visible() {
+    if !doc.shown(id) {
         put("visible", Value::Bool(false));
     }
     if n.locked() {
         put("locked", Value::Bool(true));
     }
-    if n.opacity() != 1.0 {
-        put("opacity", Value::from(n.opacity()));
+    let opacity = doc.drawn_opacity(id);
+    if opacity != 1.0 {
+        put("opacity", Value::from(opacity));
     }
     if n.blend() != BlendMode::default_for(n.kind()) {
         put("blend", Value::from(n.blend().label()));
@@ -4808,8 +4819,8 @@ pub fn tree(doc: &Document, id: NodeId) -> Option<Value> {
     if !n.exports().is_empty() {
         put("exports", values(n.exports()));
     }
-    if let Some(d) = n.display() {
-        put("display", serde_json::to_value(d).unwrap_or_default());
+    if let Some(d) = doc.resolved_display(id) {
+        put("display", serde_json::to_value(&*d).unwrap_or_default());
     }
     if *n.item() != LayoutItem::default() {
         put("item", serde_json::to_value(n.item()).unwrap_or_default());

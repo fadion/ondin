@@ -4514,10 +4514,11 @@ fn set_fills_writes_a_selection_as_the_inspector_does() {
 
 /// `verbs::tree` reads a layer back in `insert_subtree`'s shape with what the
 /// snapshot leaves out — a hidden fill, the strokes, effects and exports whole, a
-/// text's runs, a mask's mode — so inserting what it read makes a copy that reads
-/// back the same.
+/// text's runs, a mask's mode — and a bound width as drawn, so inserting what it
+/// read makes a copy drawn the same that reads back the same.
 ///
-/// flip: `tree` keeping visible fills only → fails at "the hidden fill is read".
+/// flip: `tree` keeping visible fills only → fails at "the hidden fill is read";
+/// `tree` writing the stored kind → fails at "the bound width as drawn".
 #[test]
 fn tree_reads_a_layer_back_as_insert_subtree_takes_it() {
     use ondin_core::typography::CharAttr;
@@ -4559,9 +4560,16 @@ fn tree_reads_a_layer_back_as_insert_subtree_takes_it() {
         { "verb": "set_exports", "args": { "nodes": [f.to_wire()], "exports": verbs::example("[ExportSpec]").unwrap() } },
         { "verb": "create_node", "args": { "parent": f.to_wire(), "kind": rect(10.0, 10.0) }, "as": "m" },
         { "verb": "set_mask", "args": { "nodes": ["@m"], "mask": true, "mode": "luminance" } },
+        { "verb": "add_variable", "args": { "kind": "number", "name": "w", "value": { "number": 240.0 } }, "as": "w" },
+        { "verb": "bind_variable", "args": { "nodes": [f.to_wire()], "field": { "size": 0 }, "variable": "@w" } },
     ]);
     script(&mut doc, &mut ids, steps);
     let read = verbs::tree(&doc, f).expect("a layer");
+    assert_eq!(
+        read["kind"]["Artboard"]["size"]["width"],
+        json!(240.0),
+        "the bound width as drawn"
+    );
     assert_eq!(
         read["fills"].as_array().map(Vec::len),
         Some(2),

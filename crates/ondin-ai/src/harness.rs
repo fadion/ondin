@@ -1101,6 +1101,7 @@ const DSH_TOOL_ROWS: &[&str] = &[
     "tool-subagent-fork",
     "tool-subagent-control",
     "tool-subagent-list-agents",
+    "tool-agent-team",
     "tool-workflow",
     "tool-working-directory",
     "tool-todo",

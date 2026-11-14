@@ -10948,6 +10948,7 @@ impl OndinApp {
         }
         // The draft is a preview already: nothing is saved until *Save changes*.
         if let Some(p) = slot.pref_scoped() {
+            self.arm_pref_colour_scrub(p);
             return self.write_pref_colour(p, &brush);
         }
         let tx = self.slot_transaction(id, slot, brush);
@@ -10960,6 +10961,16 @@ impl OndinApp {
         // The answer, not `true`: `picker::pointer_slot` falls through to the
         // valve on a refused write, rather than arming the chrome retreat.
         !tx.0.is_empty()
+    }
+    /// Snapshot Settings colour `p` as the pointer gesture writing it begins, once:
+    /// what a right-click cancel puts back (`InFlight::pref_colour_scrub`). The
+    /// release clears it (`OndinApp::end_released_gestures`).
+    fn arm_pref_colour_scrub(&mut self, p: super::paint::PrefColour) {
+        if self.in_flight.pref_colour_scrub.is_none()
+            && let Some(colour) = self.pref_colour(p)
+        {
+            self.in_flight.pref_colour_scrub = Some((p, colour));
+        }
     }
     /// Preview a slot edit while a control is dragged, commit once on release.
     /// Whether it committed this frame; for a character slot, whether the gesture
@@ -10981,6 +10992,9 @@ impl OndinApp {
         // the picker calls the valve every frame, and an idle control's brush is the
         // colour from before this frame's pick on another control.
         if let Some(p) = slot.pref_scoped() {
+            if resp.dragged() {
+                self.arm_pref_colour_scrub(p);
+            }
             if resp.dragged() || resp.has_focus() || resp.changed() {
                 self.write_pref_colour(p, &brush);
             }

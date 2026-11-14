@@ -176,6 +176,11 @@ pub(crate) struct InFlight {
     /// same reasons as [`Self::settings_scrub`]. The card answers the right-click
     /// itself, since the editor's cancel does not run behind the library.
     pub(crate) library_scrub: Option<crate::panels::dashboard::LibraryNumbers>,
+    /// A Settings colour as it was when the picker's plane or a strip was pressed on
+    /// it. The picker writes the draft directly, as there is no document preview to
+    /// drop, so a right-click cancel puts this back.
+    pub(crate) pref_colour_scrub:
+        Option<(crate::panels::paint::PrefColour, ondin_core::peniko::Color)>,
     /// The batch rename box's numbering as it was when a From, Step or Pad scrub
     /// began, for the same reasons as [`Self::settings_scrub`].
     pub(crate) rename_scrub: Option<ondin_core::rename::Numbering>,
@@ -262,6 +267,16 @@ mod in_flight_tests {
                 "library_scrub",
                 InFlight {
                     library_scrub: Some(Default::default()),
+                    ..Default::default()
+                },
+            ),
+            (
+                "pref_colour_scrub",
+                InFlight {
+                    pref_colour_scrub: Some((
+                        crate::panels::paint::PrefColour::Guide,
+                        ondin_core::peniko::Color::BLACK,
+                    )),
                     ..Default::default()
                 },
             ),
@@ -3045,6 +3060,7 @@ impl OndinApp {
         self.in_flight.session_scrub = None;
         self.in_flight.settings_scrub = None;
         self.in_flight.library_scrub = None;
+        self.in_flight.pref_colour_scrub = None;
         self.in_flight.rename_scrub = None;
         self.in_flight.repeat_scrub = None;
         self.in_flight.blend_scrub = None;
@@ -3164,6 +3180,10 @@ impl OndinApp {
             && let Some(settings) = &mut self.settings
         {
             settings.restore(scrubbed);
+        }
+        // And a Settings colour the picker was dragging.
+        if let Some((which, colour)) = self.in_flight.pref_colour_scrub.take() {
+            self.write_pref_colour(which, &ondin_core::Brush::Solid(colour));
         }
         // And the batch rename box's numbering.
         if let Some(n) = self.in_flight.rename_scrub.take()

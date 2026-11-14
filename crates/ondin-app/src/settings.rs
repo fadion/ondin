@@ -2858,6 +2858,50 @@ mod tests {
         frame(ctx, app, Vec::new());
     }
 
+    /// A right-click while the picker is dragging a Settings colour puts the colour
+    /// back as it was at the press, and the held button moves it no further.
+    /// flip: drop the `pref_colour_scrub` arm from `cancel_gesture` → fails at
+    /// "back to the press".
+    #[test]
+    fn a_right_click_winds_a_picked_settings_colour_back() {
+        let ctx = egui::Context::default();
+        let (mut app, _, picker) = settings_with_picker(&ctx, PrefColour::Grid);
+        let before = app.pref_colour(PrefColour::Grid);
+        let at = picker.center();
+        let press = egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(&ctx, &mut app, vec![egui::Event::PointerMoved(at), press]);
+        for step in 1..=4 {
+            let to = at + egui::vec2(12.0 * step as f32, 6.0 * step as f32);
+            frame(&ctx, &mut app, vec![egui::Event::PointerMoved(to)]);
+        }
+        assert_ne!(
+            app.pref_colour(PrefColour::Grid),
+            before,
+            "the fixture: the drag moved the colour"
+        );
+        assert!(
+            app.cancel_gesture(&ctx),
+            "a picked Settings colour is a gesture"
+        );
+        assert_eq!(
+            app.pref_colour(PrefColour::Grid),
+            before,
+            "back to the press"
+        );
+        let further = at + egui::vec2(-40.0, 30.0);
+        frame(&ctx, &mut app, vec![egui::Event::PointerMoved(further)]);
+        assert_eq!(
+            app.pref_colour(PrefColour::Grid),
+            before,
+            "the held button moves it no further"
+        );
+    }
+
     /// The picker opens beside the card and stays live over it after a press on the
     /// card raises the modal: a press in the picker picks into the form's draft,
     /// and neither cancels the form nor reaches the saved preferences.

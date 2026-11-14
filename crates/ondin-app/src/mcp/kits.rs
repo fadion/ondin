@@ -489,16 +489,14 @@ fn mark(docs: &mut impl Documents, path: &Path, call: &Call) -> Result<Answer, S
     let shared = s.doc.meta().kit.as_ref().is_some_and(|k| k.is_shared());
     let (said, answer) = match call.tool.as_str() {
         "make_kit" => {
-            crate::kits::mark_kit(s);
+            crate::kits::mark_kit(s)?;
             (
                 crate::kits::made_kit_said(&name),
                 json!({ "id": s.doc.meta().id }),
             )
         }
         "stop_sharing_kit" => {
-            if !crate::kits::unmark_kit(s) {
-                return Err("This document is not a kit".to_owned());
-            }
+            crate::kits::unmark_kit(s)?;
             (crate::kits::stopped_sharing_said(&name), json!({}))
         }
         _ => {
@@ -669,6 +667,32 @@ mod tests {
 
     fn on_disk(path: &PathBuf) -> ondin_core::Document {
         ondin_core::io::load(&std::fs::read(path).unwrap()).unwrap()
+    }
+
+    /// The agent's `make_kit` and `stop_sharing_kit` refuse where the document
+    /// menu does not offer them, and a refusal writes nothing.
+    ///
+    /// flip: `unmark_kit` testing only that a mark exists → fails at "a second
+    /// stop is refused".
+    #[test]
+    fn kit_marks_refuse_as_the_menu_does() {
+        let root = crate::kits::picker::tests::temp_root("mcp-kit-refusals");
+        let (mut engine, mut docs) = (Engine::default(), Headless::new(Some(root.clone())));
+        let (e, d) = (&mut engine, &mut docs);
+        let made = ok(e, d, "create_document", json!({ "name": "Atlas" }));
+        let path = PathBuf::from(made["path"].as_str().unwrap());
+        ok(e, d, "use_document", json!({ "document": path }));
+        let why = refused(e, d, "stop_sharing_kit", json!({}));
+        assert_eq!(why, crate::kits::NOT_A_KIT, "not a kit yet");
+        ok(e, d, "make_kit", json!({}));
+        let why = refused(e, d, "make_kit", json!({}));
+        assert_eq!(why, crate::kits::ALREADY_A_KIT, "a second make is refused");
+        ok(e, d, "stop_sharing_kit", json!({}));
+        let bytes = std::fs::read(&path).unwrap();
+        let why = refused(e, d, "stop_sharing_kit", json!({}));
+        assert_eq!(why, crate::kits::NOT_A_KIT, "a second stop is refused");
+        assert_eq!(std::fs::read(&path).unwrap(), bytes, "nothing written");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// `serve` answers Phase 4 from its own library: it lists what it filed,

@@ -660,22 +660,16 @@ impl OndinApp {
         let shared = self.shared_kit().is_some();
         push(
             &mut out,
-            Cmd::verb(
-                Item::MakeKit,
-                shared.then_some("This document is already a kit"),
-            ),
+            Cmd::verb(Item::MakeKit, shared.then_some(crate::kits::ALREADY_A_KIT)),
         );
-        let mut icons = Cmd::verb(
-            Item::IconPack,
-            (!shared).then_some("This document is not a kit"),
-        );
+        let mut icons = Cmd::verb(Item::IconPack, (!shared).then_some(crate::kits::NOT_A_KIT));
         icons.checked = Some(self.shared_kit().is_some_and(|k| k.icons));
         push(&mut out, icons);
         push(
             &mut out,
             Cmd::verb(
                 Item::StopSharingKit,
-                (!shared).then_some("This document is not a kit"),
+                (!shared).then_some(crate::kits::NOT_A_KIT),
             ),
         );
         push(

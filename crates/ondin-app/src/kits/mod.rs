@@ -195,7 +195,9 @@ impl OndinApp {
         // The save below is of `session.doc`, which holds no typed text until
         // the session ends.
         self.finish_text_first();
-        mark_kit(&mut self.session);
+        if mark_kit(&mut self.session).is_err() {
+            return;
+        }
         // A failed save's own message stands — the status line has one slot
         // (`D1013`'s fix); the mark is in the document and goes out with the
         // next save that works.
@@ -257,7 +259,7 @@ impl OndinApp {
         }
         // As `make_kit`: the save holds no typed text until the session ends.
         self.finish_text_first();
-        if !unmark_kit(&mut self.session) {
+        if unmark_kit(&mut self.session).is_err() {
             return;
         }
         // A failed save's own message stands — the status line has one slot
@@ -500,29 +502,41 @@ impl OndinApp {
 
 /// *Make this a kit* on `s`'s document, before its save: the kit mark set to
 /// sharing, its version kept, and an id minted for a document with none, as
-/// filing mints one. Shared by the menu row and the agent's `make_kit`.
-pub(crate) fn mark_kit(s: &mut crate::session::EditorSession) {
+/// filing mints one. Shared by the menu row and the agent's `make_kit`, and
+/// refused with [`ALREADY_A_KIT`], nothing changed, for a kit already sharing.
+pub(crate) fn mark_kit(s: &mut crate::session::EditorSession) -> Result<(), &'static str> {
     let mut meta = s.doc.meta().clone();
+    if meta.kit.as_ref().is_some_and(KitMark::is_shared) {
+        return Err(ALREADY_A_KIT);
+    }
     if meta.id.is_none() {
         meta.id = Some(crate::library::ids::mint());
     }
     meta.kit.get_or_insert_with(KitMark::default).sharing = true;
     s.doc.set_meta(meta);
     s.mark_unsaved();
+    Ok(())
 }
 
 /// *Stop sharing as kit* on `s`'s document, before its save: the mark kept, no
-/// longer sharing. `false`, with nothing changed, when it has no mark.
-pub(crate) fn unmark_kit(s: &mut crate::session::EditorSession) -> bool {
+/// longer sharing. Refused with [`NOT_A_KIT`], nothing changed, unless it is
+/// sharing.
+pub(crate) fn unmark_kit(s: &mut crate::session::EditorSession) -> Result<(), &'static str> {
     let mut meta = s.doc.meta().clone();
-    let Some(kit) = meta.kit.as_mut() else {
-        return false;
+    let Some(kit) = meta.kit.as_mut().filter(|k| k.is_shared()) else {
+        return Err(NOT_A_KIT);
     };
     kit.sharing = false;
     s.doc.set_meta(meta);
     s.mark_unsaved();
-    true
+    Ok(())
 }
+
+/// Why a kit row does not apply to a document that is not a sharing kit.
+pub(crate) const NOT_A_KIT: &str = "This document is not a kit";
+
+/// Why *Make this a kit* does not apply to a kit already sharing.
+pub(crate) const ALREADY_A_KIT: &str = "This document is already a kit";
 
 /// The status line after `name` is made a kit.
 pub(crate) fn made_kit_said(name: &str) -> String {

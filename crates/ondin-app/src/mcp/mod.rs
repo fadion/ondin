@@ -501,14 +501,14 @@ impl Engine {
         let fonts_checked = match call.tool.as_str() {
             "replace_font" => host_font(docs, &mut call.args),
             "batch" | "propose_edit" => {
-                let list = if call.tool == "batch" {
-                    "steps"
-                } else {
-                    "calls"
+                // A batch's steps name their `tool`, a proposal's calls their `verb`.
+                let (list, name) = match call.tool == "batch" {
+                    true => ("steps", "tool"),
+                    false => ("calls", "verb"),
                 };
                 let steps = call.args.get_mut(list).and_then(Value::as_array_mut);
                 steps.into_iter().flatten().try_for_each(|step| {
-                    match step.get("tool").and_then(Value::as_str) {
+                    match step.get(name).and_then(Value::as_str) {
                         Some("replace_font") => match step.get_mut("args") {
                             Some(args) => host_font(docs, args),
                             None => Ok(()),
@@ -2752,6 +2752,12 @@ mod tests {
         );
         assert!(out.is_error, "a batch step is refused");
         assert_eq!(family(&docs), from);
+        // And as a proposal's call.
+        // flip: the check reading a proposal call's `tool` → fails here.
+        let proposed = json!({ "title": "Swap", "calls": [{ "verb": "replace_font",
+            "args": { "from": from, "to": "Nowhere Sans" } }] });
+        let out = call(&mut engine, &mut docs, 1, "propose_edit", proposed);
+        assert!(out.is_error, "a proposal's call is refused");
         let args = json!({ "from": from, "to": "lora" });
         ok(&call(&mut engine, &mut docs, 1, "replace_font", args));
         assert_eq!(family(&docs), "Lora", "in the host's spelling");

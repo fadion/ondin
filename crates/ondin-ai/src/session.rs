@@ -402,6 +402,13 @@ impl Session {
     }
 }
 
+// Dropping a session can run `agy mcp remove` and scan Cursor's folder, so a
+// caller may drop it on a thread of its own; this keeps that possible.
+const _: fn() = || {
+    fn is_send<T: Send>() {}
+    is_send::<Session>();
+};
+
 impl Drop for Session {
     fn drop(&mut self) {
         let inner = &self.inner;

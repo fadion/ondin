@@ -141,6 +141,10 @@ name (`claude`) and a speaker name (*Claude*) shown on its replies. An unknown s
   Under the mark the `ondin` command line refuses everything but `mcp-proxy`, `serve` included, and
   the proxy connects only to the window, never starting `serve`: the window holds the chat's grant
   and `serve` none, so an agent there would act unchecked. A speed bump rather than a boundary.
+  Codex and Cursor start an MCP server without the agent's environment, so their server config
+  sets the mark itself, and the proxy also counts a chat's `--client` key (`assistant-…`) as the
+  mark. Every child's `PWD` is its own working folder: OpenCode's runtime reads an inherited one
+  as its working folder, which would put it in the shell's folder Ondin was started from.
 - **The window must have its endpoint.** A chat refuses to start when the window could not open
   its MCP endpoint, since the chat's level lives in the window's grants.
 - **A command line too long** for the platform is refused before spawning, naming the limit and
@@ -411,12 +415,24 @@ layers being asked about, and is one more kind of surface.
   harness's proxy connecting before `Session::start` returns; the grant with the session's process
   owner covers a process that sends another key or none
   (`an_owned_process_gets_the_chats_level_whatever_its_key`).
-- **An agent is kept off `serve` twice.** The proxy under `ONDIN_AGENT_CHILD` connects only to the
-  window (`proxy::Machine::connect`), and `main` refuses `ondin serve` under the mark, for an
-  agent with a shell. Each looks redundant beside the other; `serve` holds no grant, so either
-  gone lets an agent act unchecked. No test pins either.
+- **An agent is kept off `serve` twice.** The proxy under `ONDIN_AGENT_CHILD` or a chat's key
+  connects only to the window (`proxy::Machine::connect`, `pick_host`), and `main` refuses
+  `ondin serve` under the mark, for an agent with a shell. Each looks redundant beside the other;
+  `serve` holds no grant, so either gone lets an agent act unchecked. The key check is not
+  redundant with the mark either: Codex and Cursor scrub their servers' environment, and only
+  their config's `env` puts the mark back.
 - **Copilot's `--available-tools` with an empty value fails open** (every tool, the shell
   included), so an empty grant names a tool nothing provides
   (`copilot_never_sends_an_empty_allowlist`).
 - **Antigravity has no interrupt line**: it ignores an unknown stdin event silently, so a guessed
   interrupt would hang the turn rather than fail. It is killed and resumed with `--conversation`.
+- **Antigravity's seal is `--mode plan`, not `--sandbox`.** The sandbox restricts its terminal
+  only; in a folder the person trusts (their home is a common entry) its own `write_file` and
+  `run_command` still act, which was measured writing a file outside the run folder. Plan mode
+  refuses both and leaves Ondin's allowed tools working. Headless, a refused tool ends its turn,
+  so the system prompt tells every agent to call Ondin's tools directly rather than look around.
+- **Cursor runs in its default mode.** `--mode ask` held back nothing the permissions file did not,
+  and had the model refuse the edits a chat at *Edit* asked for.
+- **DeepSeek Harness grows tool plugins.** The per-turn check refuses a profile with a tool row
+  the overlay does not disable (`tool-agent-team` arrived this way); the row then joins
+  `DSH_TOOL_ROWS`.

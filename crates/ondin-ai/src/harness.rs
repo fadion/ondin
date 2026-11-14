@@ -966,6 +966,8 @@ pub(crate) fn opencode_config_leaks(output: &str) -> Option<Vec<String>> {
 /// `-c` overrides giving Codex Ondin's server and only Ondin's: the whole
 /// `mcp_servers` table is assigned, displacing the person's own. `codex exec`
 /// cannot ask, so each granted tool is approved by name or every call is refused.
+/// Codex starts a server with a scrubbed environment, so the child marker is
+/// passed in its `env`.
 pub(crate) fn codex_mcp_overrides(exe: &str, args: &[String], allowed: &[String]) -> Vec<String> {
     let tools = allowed
         .iter()
@@ -978,8 +980,9 @@ pub(crate) fn codex_mcp_overrides(exe: &str, args: &[String], allowed: &[String]
         .collect::<Vec<_>>()
         .join(",");
     vec![format!(
-        "mcp_servers={{{MCP_SERVER}={{command={},args=[{args}],tools={{{tools}}}}}}}",
+        "mcp_servers={{{MCP_SERVER}={{command={},args=[{args}],env={{{}=\"1\"}},tools={{{tools}}}}}}}",
         toml_str(exe),
+        crate::AGENT_CHILD_ENV,
     )]
 }
 
@@ -1056,10 +1059,15 @@ pub(crate) fn cursor_permissions_json(allowed: &[String]) -> String {
 }
 
 /// The project `.cursor/mcp.json` giving a Cursor session Ondin's server. It
-/// loads only once `cursor-agent mcp enable ondin` approves it.
+/// loads only once `cursor-agent mcp enable ondin` approves it. Cursor starts a
+/// server without the agent's environment, so the child marker is in `env`.
 pub(crate) fn cursor_mcp_config_json(exe: &str, args: &[String]) -> String {
     serde_json::json!({
-        "mcpServers": { MCP_SERVER: { "command": exe, "args": args } }
+        "mcpServers": { MCP_SERVER: {
+            "command": exe,
+            "args": args,
+            "env": { crate::AGENT_CHILD_ENV: "1" },
+        } }
     })
     .to_string()
 }
@@ -1652,8 +1660,19 @@ mod tests {
         }
     }
 
+    /// Cursor's server is started carrying the agent marker.
+    #[test]
+    fn cursor_server_carries_the_agent_marker() {
+        let v: serde_json::Value =
+            serde_json::from_str(&cursor_mcp_config_json("ondin", &["mcp-proxy".into()])).unwrap();
+        assert_eq!(
+            v["mcpServers"][MCP_SERVER]["env"][crate::AGENT_CHILD_ENV],
+            "1"
+        );
+    }
+
     /// Codex's server override names Ondin's server with each tool approved,
-    /// and Windows paths survive TOML.
+    /// the agent marker in its environment, and Windows paths survive TOML.
     #[test]
     fn codex_override_approves_each_granted_tool() {
         let o = codex_mcp_overrides(
@@ -1663,7 +1682,7 @@ mod tests {
         );
         assert_eq!(
             o[0],
-            r#"mcp_servers={ondin={command="C:\\Ondin\\ondin.exe",args=["mcp-proxy","--client","k"],tools={get_node={approval_mode="approve"}}}}"#
+            r#"mcp_servers={ondin={command="C:\\Ondin\\ondin.exe",args=["mcp-proxy","--client","k"],env={ONDIN_AGENT_CHILD="1"},tools={get_node={approval_mode="approve"}}}}"#
         );
     }
 

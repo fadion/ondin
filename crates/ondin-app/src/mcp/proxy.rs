@@ -44,13 +44,14 @@ fn pick_host(found: Vec<Found>, agent: bool) -> Result<Option<Found>, String> {
     }
 }
 
-/// The hosts this machine runs.
-struct Machine;
+/// The hosts this machine runs, for an assistant's agent or anyone else.
+struct Machine {
+    agent: bool,
+}
 
 impl Hosts for Machine {
     fn connect(&mut self) -> Result<(Host, endpoint::Stream), String> {
-        let agent = std::env::var_os(ondin_ai::AGENT_CHILD_ENV).is_some();
-        let found = match pick_host(endpoint::hosts(), agent)? {
+        let found = match pick_host(endpoint::hosts(), self.agent)? {
             Some(h) => h,
             None => start_serve()?,
         };
@@ -119,12 +120,17 @@ pub(crate) fn run(
     document: Option<String>,
     all_tools: bool,
 ) -> Result<(), String> {
+    // Both, since a harness may start its server with a scrubbed environment.
+    let agent = std::env::var_os(ondin_ai::AGENT_CHILD_ENV).is_some()
+        || client
+            .as_deref()
+            .is_some_and(crate::assistant::is_client_key);
     carry(
         std::io::stdin().lock(),
         std::io::stdout(),
         Ask { client, all_tools },
         document.map(|d| absolute(&d)),
-        &mut Machine,
+        &mut Machine { agent },
     )
 }
 

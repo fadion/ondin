@@ -318,7 +318,14 @@ impl Assistant {
 
 /// The session's client key: unique per session in this window.
 fn client_key(n: u64) -> String {
-    format!("assistant-{}-{n}", std::process::id())
+    format!("{CLIENT_KEY_PREFIX}{}-{n}", std::process::id())
+}
+
+const CLIENT_KEY_PREFIX: &str = "assistant-";
+
+/// Whether `key` is one [`client_key`] makes: the proxy serving it is a chat's.
+pub(crate) fn is_client_key(key: &str) -> bool {
+    key.starts_with(CLIENT_KEY_PREFIX)
 }
 
 /// Where sessions make their run folders.
@@ -1203,6 +1210,14 @@ impl OndinApp {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// The proxy knows a chat's own key, and only that, as an assistant's.
+    #[test]
+    fn a_chat_s_key_reads_as_an_assistant_s() {
+        assert!(is_client_key(&client_key(3)));
+        assert!(!is_client_key("claude-code"));
+        assert!(!is_client_key(""));
+    }
 
     /// A tool's argument is the id, query or name it was given.
     #[test]

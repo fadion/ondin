@@ -116,18 +116,34 @@ impl OndinApp {
             let composer_id = ui.id().with("composer-h");
             let composer_h: f32 = ui.data(|d| d.get_temp(composer_id)).unwrap_or(106.0);
             let thread_h = (ui.available_height() - composer_h).max(40.0);
-            ui.allocate_ui(egui::vec2(inner, thread_h), |ui| {
-                ui.set_min_height(thread_h);
-                egui::ScrollArea::vertical()
-                    .id_salt("assistant-thread")
-                    .auto_shrink([false, false])
-                    .stick_to_bottom(true)
-                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-                    .show(ui, |ui| {
+            // The thread's last room, content height and whether it was held
+            // at its end. egui keeps a scroll at its end only after painting,
+            // so when the room changes under a thread held there, its offset
+            // is set here or the messages lag the composer by a frame.
+            let fit_id = ui.id().with("thread-fit");
+            let fit: Option<(f32, f32, bool)> = ui.data(|d| d.get_temp(fit_id));
+            let mut scroll = egui::ScrollArea::vertical()
+                .id_salt("assistant-thread")
+                .auto_shrink([false, false])
+                .stick_to_bottom(true)
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden);
+            if let Some((room, content, true)) = fit
+                && (room - thread_h).abs() > 0.5
+            {
+                scroll = scroll.vertical_scroll_offset((content - thread_h).max(0.0));
+            }
+            let out = ui
+                .allocate_ui(egui::vec2(inner, thread_h), |ui| {
+                    ui.set_min_height(thread_h);
+                    scroll.show(ui, |ui| {
                         ui.set_width(inner);
                         self.assistant_thread(ui, now, &mut acts);
-                    });
-            });
+                    })
+                })
+                .inner;
+            let room = out.inner_rect.height();
+            let at_end = out.state.offset.y >= out.content_size.y - room - 0.5;
+            ui.data_mut(|d| d.insert_temp(fit_id, (room, out.content_size.y, at_end)));
             let top = ui.cursor().top();
             self.assistant_composer(ui, blocked.as_ref(), &mut acts);
             let used = ui.cursor().top() - top;

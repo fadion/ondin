@@ -1318,4 +1318,97 @@ mod tests {
         assert!(all.contains("Fill"), "the options draw as buttons: {all}");
         assert!(all.contains("The assistant is off"), "{all}");
     }
+
+    /// When the composer grows (a chip attached, a line broken), the thread's
+    /// last message and the composer's text land where they rest on that very
+    /// frame, not one frame late.
+    /// flip: `assistant_ui` without its `request_discard` → fails at "the
+    /// composer"; without the thread's `vertical_scroll_offset` → fails at
+    /// "the thread".
+    #[test]
+    fn the_thread_and_composer_move_together_when_the_composer_grows() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, _) = app_with_card(&ctx);
+        app.canvas_rect =
+            egui::Rect::from_min_size(egui::pos2(46.0, 40.0), egui::vec2(1200.0, 800.0));
+        app.assistant_button =
+            egui::Rect::from_min_size(egui::pos2(8.0, 700.0), egui::vec2(30.0, 30.0));
+        let h = ai::Harness::ALL[0];
+        app.prefs.assistant.agent = h.key().to_owned();
+        app.session.path = Some(PathBuf::from("probe.ondin"));
+        let (_tx, rx) = std::sync::mpsc::channel();
+        app.assistant.lookup = Some(Lookup::Pending(h, None, rx));
+        app.toggle_assistant();
+        app.assistant.msgs = (0..12)
+            .map(|i| Msg::Person {
+                text: format!("Question {i}"),
+                chips: Vec::new(),
+            })
+            .collect();
+        // The last question's top and the composer text's top.
+        let at = |out: &egui::FullOutput| {
+            let y = |pick: &dyn Fn(&str) -> bool| {
+                out.shapes.iter().find_map(|s| match &s.shape {
+                    egui::Shape::Text(t) if pick(t.galley.text()) => Some(t.pos.y),
+                    _ => None,
+                })
+            };
+            (
+                y(&|t| t == "Question 11"),
+                y(&|t| t.starts_with("Ask a") || t.starts_with("abc")),
+            )
+        };
+        let frame = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                events,
+                ..Default::default()
+            };
+            at(&ctx.run_ui(input, |ui| app.assistant_ui(ui.ctx())))
+        };
+        let settled = |app: &mut OndinApp| {
+            let mut last = frame(app, vec![]);
+            for _ in 0..3 {
+                last = frame(app, vec![]);
+            }
+            last
+        };
+        type At = (Option<f32>, Option<f32>);
+        let check = |what: &str, before: At, first: At, rest: At| {
+            assert_ne!(before, rest, "{what} moved the composer at all");
+            assert_eq!(
+                first.1, rest.1,
+                "{what}: the composer lands on the first frame"
+            );
+            assert_eq!(
+                first.0, rest.0,
+                "{what}: the thread lands on the first frame"
+            );
+        };
+        let before = settled(&mut app);
+        app.ask_assistant();
+        assert_eq!(app.assistant.chips.len(), 1, "a chip is attached");
+        let first = frame(&mut app, vec![]);
+        let rest = settled(&mut app);
+        check("a chip", before, first, rest);
+
+        app.assistant.focus = true;
+        let shift_enter = egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::SHIFT,
+        };
+        // The composer shows two rows empty: the first break fills the second.
+        frame(&mut app, vec![egui::Event::Text("abc".into())]);
+        frame(&mut app, vec![shift_enter.clone()]);
+        for n in 0..2 {
+            frame(&mut app, vec![egui::Event::Text("abc".into())]);
+            let before = settled(&mut app);
+            let first = frame(&mut app, vec![shift_enter.clone()]);
+            let rest = settled(&mut app);
+            check(&format!("line {n}"), before, first, rest);
+        }
+    }
 }

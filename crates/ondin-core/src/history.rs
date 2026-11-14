@@ -104,6 +104,10 @@ pub struct SavedStep {
     pub note: StepNote,
 }
 
+/// A [`History`]'s undone steps, held aside by [`History::take_redo`].
+#[derive(Default)]
+pub struct RedoStack(Vec<Step>);
+
 #[derive(Default)]
 pub struct History {
     undo: Vec<Step>,
@@ -252,6 +256,20 @@ impl History {
     /// its own steps and must not leave them for a redo.
     pub fn clear_redo(&mut self) {
         self.redo.clear();
+    }
+
+    /// Take the undone steps out, for a caller about to commit steps it may take
+    /// back: a commit clears the redo stack, and [`Self::restore_redo`] puts these
+    /// back once the tentative steps are undone and cleared.
+    pub fn take_redo(&mut self) -> RedoStack {
+        RedoStack(std::mem::take(&mut self.redo))
+    }
+
+    /// Put back the undone steps [`Self::take_redo`] took, replacing whatever is
+    /// undone now. Each keeps its own serial.
+    pub fn restore_redo(&mut self, stack: RedoStack) {
+        self.redo = stack.0;
+        self.run = None;
     }
 
     /// Undo the most recent transaction, returning its `DirtySet` (or `None` if
@@ -447,6 +465,25 @@ mod tests {
 
     fn x_of(doc: &Document, id: NodeId) -> f64 {
         doc.get(id).unwrap().transform().translation().x
+    }
+
+    /// The undone steps held aside around a tentative commit that is taken back
+    /// come back whole, and redo as they would have.
+    /// flip: `restore_redo` leaving the stack it was given out → fails at "redo kept".
+    #[test]
+    fn redo_held_aside_survives_a_commit_taken_back() {
+        let (mut doc, mut history, rect) = doc_with_rect();
+        history.commit(&mut doc, move_to(rect, 5.0)).unwrap();
+        history.undo(&mut doc).unwrap();
+        assert_eq!(history.redo_depth(), 1, "the fixture: one undone step");
+        let held = history.take_redo();
+        history.commit(&mut doc, move_to(rect, 9.0)).unwrap();
+        history.undo(&mut doc).unwrap();
+        history.clear_redo();
+        history.restore_redo(held);
+        assert_eq!(history.redo_depth(), 1, "redo kept");
+        history.redo(&mut doc).unwrap();
+        assert_eq!(x_of(&doc, rect), 5.0);
     }
 
     /// Joined steps undo as one, the latest first, and redo as one: a layer made

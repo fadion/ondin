@@ -1321,10 +1321,11 @@ mod tests {
 
     /// When the composer grows (a chip attached, a line broken), the thread's
     /// last message and the composer's text land where they rest on that very
-    /// frame, not one frame late.
+    /// frame, not one frame late, and the panel itself does not move.
     /// flip: `assistant_ui` without its `request_discard` → fails at "the
     /// composer"; without the thread's `vertical_scroll_offset` → fails at
-    /// "the thread".
+    /// "the thread"; `ui::rail_popup` constrained to the window → fails at
+    /// "the panel stays put".
     #[test]
     fn the_thread_and_composer_move_together_when_the_composer_grows() {
         let ctx = egui::Context::default();
@@ -1346,7 +1347,7 @@ mod tests {
                 chips: Vec::new(),
             })
             .collect();
-        // The last question's top and the composer text's top.
+        // The last question's top, the composer text's top and the head's top.
         let at = |out: &egui::FullOutput| {
             let y = |pick: &dyn Fn(&str) -> bool| {
                 out.shapes.iter().find_map(|s| match &s.shape {
@@ -1357,10 +1358,15 @@ mod tests {
             (
                 y(&|t| t == "Question 11"),
                 y(&|t| t.starts_with("Ask a") || t.starts_with("abc")),
+                y(&|t| t == h.label()),
             )
         };
+        // The window ends just under the panel, as it does in the app: a pass
+        // whose content overflowed would be pushed up by the window's edge.
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1300.0, 738.0));
         let frame = |app: &mut OndinApp, events: Vec<egui::Event>| {
             let input = egui::RawInput {
+                screen_rect: Some(screen),
                 events,
                 ..Default::default()
             };
@@ -1373,9 +1379,11 @@ mod tests {
             }
             last
         };
-        type At = (Option<f32>, Option<f32>);
+        type At = (Option<f32>, Option<f32>, Option<f32>);
         let check = |what: &str, before: At, first: At, rest: At| {
             assert_ne!(before, rest, "{what} moved the composer at all");
+            assert!(first.2.is_some(), "{what}: the head is drawn");
+            assert_eq!(first.2, before.2, "{what}: the panel stays put");
             assert_eq!(
                 first.1, rest.1,
                 "{what}: the composer lands on the first frame"

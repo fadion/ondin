@@ -221,7 +221,9 @@ pub const RAIL_POPUP_PAD: f32 = 12.0;
 /// variables*): a [`card_frame`] `height` tall whose bottom-left is `anchor`,
 /// holding `Tab`. Placed by its top-left, not pivoted on its bottom: a pivot
 /// places the area by *last* frame's size, and with the height fixed the top
-/// edge is known before the frame starts. Answers the card's response.
+/// edge is known before the frame starts. Not constrained to the window for
+/// the same reason: a pass whose content overflowed would be shoved up by the
+/// size it left, for a frame. Answers the card's response.
 pub fn rail_popup(
     ctx: &egui::Context,
     id: &str,
@@ -231,6 +233,7 @@ pub fn rail_popup(
 ) -> egui::Response {
     egui::Area::new(egui::Id::new(id))
         .order(egui::Order::Foreground)
+        .constrain(false)
         .fixed_pos(anchor - egui::vec2(0.0, height))
         .show(ctx, |ui| {
             hold_tab(ui);

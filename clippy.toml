@@ -20,6 +20,10 @@ disallowed-methods = [
     { path = "egui::RadioButton::new", reason = "a choice of a few is ui::segmented" },
     { path = "egui::Ui::radio", reason = "a choice of a few is ui::segmented" },
     { path = "egui::Ui::toggle_value", reason = "an on/off button is ui::field_button with FieldButton::On, or ui::toggle_row" },
-    { path = "egui::Spinner::new", reason = "the loading spinner is ui::spinner, or ui::paint_spinner on a painter" },
     { path = "egui::Ui::spinner", reason = "the loading spinner is ui::spinner, or ui::paint_spinner on a painter" },
+]
+# A widget with more than one way to build it (`Spinner` has `new` and `Default`) is refused by
+# its type, which covers every constructor.
+disallowed-types = [
+    { path = "egui::Spinner", reason = "the loading spinner is ui::spinner, or ui::paint_spinner on a painter" },
 ]

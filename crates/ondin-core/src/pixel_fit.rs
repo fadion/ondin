@@ -153,20 +153,53 @@ pub fn fit_on(
     ids: &[NodeId],
     grid: Affine,
 ) -> (Transaction, Fitted) {
+    fit_with(
+        Place {
+            doc,
+            res,
+            grid,
+            locks: true,
+        },
+        ids,
+    )
+}
+
+/// [`fit_on`] for a throwaway copy, as an icon export fits: a lock keeps the
+/// person's own edits off a layer, and the copy is no one's edit, so locked
+/// layers are fitted too.
+pub fn fit_copy_on(
+    doc: &Document,
+    res: &Resolved,
+    ids: &[NodeId],
+    grid: Affine,
+) -> (Transaction, Fitted) {
+    fit_with(
+        Place {
+            doc,
+            res,
+            grid,
+            locks: false,
+        },
+        ids,
+    )
+}
+
+fn fit_with(place: Place, ids: &[NodeId]) -> (Transaction, Fitted) {
     let mut ops = Vec::new();
     let mut fitted = Fitted::default();
-    let place = Place { doc, res, grid };
-    for id in build::outermost(doc, ids) {
+    for id in build::outermost(place.doc, ids) {
         fit_layer(&place, id, &mut ops, &mut fitted);
     }
     (Transaction(ops), fitted)
 }
 
-/// What every step of a fit reads: the tree, and the grid it fits onto.
+/// What every step of a fit reads: the tree, the grid it fits onto, and whether
+/// a locked layer is left alone.
 struct Place<'a> {
     doc: &'a Document,
     res: &'a Resolved,
     grid: Affine,
+    locks: bool,
 }
 
 impl Place<'_> {
@@ -193,6 +226,7 @@ pub fn fit_points(
         doc,
         res,
         grid: Affine::IDENTITY,
+        locks: true,
     };
     let tx = fit_path(&place, id, only, &mut fitted).unwrap_or_default();
     (tx, fitted)
@@ -211,7 +245,7 @@ fn fit_layer(place: &Place, id: NodeId, ops: &mut Vec<Operation>, fitted: &mut F
         return;
     }
     // A selected group still opens onto a locked layer inside it.
-    if crate::query::is_effectively_locked(doc, id) {
+    if place.locks && crate::query::is_effectively_locked(doc, id) {
         fitted.locked += 1;
         return;
     }
@@ -667,6 +701,85 @@ mod tests {
         let (_, subs) = path_subpaths(&after, &ra, path).unwrap();
         for a in subs.iter().flat_map(|s| &s.anchors) {
             assert!(on_grid(a.at.x) && on_grid(a.at.y), "{:?}", a.at);
+        }
+    }
+
+    /// On the same finer grid, a line in a scaled group, a quarter-turned rect and
+    /// a mirrored path land on that grid's pixels (the mirror's anchors on its
+    /// half pixels), not on world units.
+    /// flip: the line arm writing `build::local_for_world` without `Place::local`'s
+    /// grid inverse → fails at "the line's ends".
+    #[test]
+    fn lines_turns_and_mirrors_fit_onto_a_finer_grid() {
+        let (doc, [g, line, turned, mirrored]) = doc_of(|root, [g, line, turned, mirrored]| {
+            let mut p = BezPath::new();
+            p.move_to((40.3, -10.0));
+            p.line_to((50.0, 0.0));
+            p.line_to((40.3, 10.0));
+            p.line_to((30.6, 0.0));
+            p.close_path();
+            vec![
+                group(g, root, Affine::translate((3.3, 1.2)) * Affine::scale(2.0)),
+                Operation::CreateNode {
+                    id: line,
+                    parent: g,
+                    index: 0,
+                    kind: NodeKind::Line {
+                        end: Point::new(10.2, 3.1),
+                    },
+                    transform: Some(Affine::translate((1.1, 2.2))),
+                    name: None,
+                },
+                rect_at(
+                    turned,
+                    root,
+                    1,
+                    Affine::translate((80.3, 4.6)) * Affine::rotate(std::f64::consts::FRAC_PI_2),
+                    Size::new(20.4, 9.7),
+                ),
+                Operation::CreateNode {
+                    id: mirrored,
+                    parent: root,
+                    index: 2,
+                    kind: NodeKind::Path {
+                        path: p,
+                        corner_radii: Vec::new(),
+                        corner_smoothing: 0.0,
+                        mirror: PathMirror {
+                            vertical: true,
+                            horizontal: false,
+                        },
+                    },
+                    transform: None,
+                    name: None,
+                },
+            ]
+        });
+        let res = Resolved::rebuild(&doc);
+        let k = 16.0 / 24.0;
+        let (tx, _) = fit_on(&doc, &res, &[g, turned, mirrored], Affine::scale(k));
+        let mut after = doc.clone();
+        after.apply(&tx).expect("the fit applies");
+        let ra = Resolved::rebuild(&after);
+        let near = |v: f64, step: f64| ((v * k / step) - (v * k / step).round()).abs() < 1e-6;
+        let world = ra.world_transform(line).unwrap();
+        let NodeKind::Line { end } = after.get(line).unwrap().kind() else {
+            panic!("a line");
+        };
+        for p in [world * Point::ZERO, world * *end] {
+            assert!(near(p.x, 1.0) && near(p.y, 1.0), "the line's ends: {p:?}");
+        }
+        let b = ra.world_bounds(turned).unwrap();
+        assert!(
+            [b.x0, b.y0, b.x1, b.y1].into_iter().all(|v| near(v, 1.0)),
+            "the quarter-turned box: {b:?}"
+        );
+        let (_, subs) = path_subpaths(&after, &ra, mirrored).unwrap();
+        for a in &subs[0].anchors {
+            assert!(
+                near(a.at.x, 0.5) && near(a.at.y, 0.5),
+                "the mirror's anchors: {subs:?}"
+            );
         }
     }
 

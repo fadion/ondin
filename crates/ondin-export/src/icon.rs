@@ -184,7 +184,7 @@ fn fitted(
 ) -> Option<Raster> {
     let grid = Affine::scale(f64::from(size) / square.width())
         * Affine::translate((-square.x0, -square.y0));
-    let (tx, _) = ondin_core::pixel_fit::fit_on(doc, res, &[node], grid);
+    let (tx, _) = ondin_core::pixel_fit::fit_copy_on(doc, res, &[node], grid);
     if tx.0.is_empty() {
         return Some(draw(doc, res, &[node], square, size, images));
     }

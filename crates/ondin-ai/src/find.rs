@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 
 /// A harness's program, found and probed.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -63,7 +64,7 @@ pub(crate) fn locate(h: Harness, program_override: Option<&Path>) -> Result<Path
         looked_in.push(p);
     }
     for cand in known_locations(h) {
-        if cand.is_file() {
+        if can_start(&cand) {
             return Ok(cand);
         }
         looked_in.push(cand);
@@ -358,14 +359,23 @@ fn pathext() -> Vec<String> {
     }
 }
 
+/// The `PATHEXT` extensions `CreateProcess` can start; the rest (`.PS1`,
+/// `.VBS`, `.JS`) open in another program, or not at all.
+const STARTABLE: [&str; 4] = [".EXE", ".COM", ".CMD", ".BAT"];
+
 /// Which file in one folder is the executable for `name`. On Windows the bare
-/// name is npm's `#!/bin/sh` script, not an executable, and a batch shim goes
-/// last: Rust refuses a multi-line argument to one.
+/// name is npm's `#!/bin/sh` script, not an executable, an extension that
+/// cannot be started is never taken, and a batch shim goes last: Rust refuses
+/// a multi-line argument to one. Elsewhere the name must match exactly.
 fn pick_executable<'a>(name: &str, present: &[&'a str], exts: &[String]) -> Option<&'a str> {
-    let has = |n: &str| present.iter().copied().find(|p| p.eq_ignore_ascii_case(n));
     if exts.is_empty() {
-        return has(name);
+        return present.iter().copied().find(|p| *p == name);
     }
+    let has = |n: &str| present.iter().copied().find(|p| p.eq_ignore_ascii_case(n));
+    let exts: Vec<&String> = exts
+        .iter()
+        .filter(|e| STARTABLE.iter().any(|s| s.eq_ignore_ascii_case(e)))
+        .collect();
     let lower = name.to_ascii_lowercase();
     if exts
         .iter()
@@ -379,6 +389,23 @@ fn pick_executable<'a>(name: &str, present: &[&'a str], exts: &[String]) -> Opti
         .filter(|e| !is_batch(e))
         .chain(exts.iter().filter(|e| is_batch(e)))
         .find_map(|e| has(&format!("{name}{e}")))
+}
+
+/// Can the OS start the file at `p`? A file, through any link (a dangling one
+/// left by an uninstall is not), and off Windows with an execute bit.
+fn can_start(p: &Path) -> bool {
+    let Ok(meta) = std::fs::metadata(p) else {
+        return false;
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        meta.is_file() && meta.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        meta.is_file()
+    }
 }
 
 /// Locate `name` on `PATH`, and the folders searched. A relative entry (the
@@ -404,7 +431,9 @@ fn which_on_path(name: &str) -> (Option<PathBuf>, Vec<PathBuf>) {
             .map(|e| e.file_name().to_string_lossy().into_owned())
             .collect();
         let refs: Vec<&str> = names.iter().map(String::as_str).collect();
-        if let Some(hit) = pick_executable(name, &refs, &exts) {
+        if let Some(hit) = pick_executable(name, &refs, &exts)
+            && can_start(&dir.join(hit))
+        {
             return (Some(dir.join(hit)), searched);
         }
     }
@@ -424,6 +453,7 @@ fn resolve_override(p: &Path) -> Option<PathBuf> {
     if cfg!(windows) && p.extension().is_none() {
         return pathext()
             .iter()
+            .filter(|e| STARTABLE.iter().any(|x| x.eq_ignore_ascii_case(e)))
             .map(|e| PathBuf::from(format!("{s}{e}")))
             .find(|c| c.is_file());
     }
@@ -488,9 +518,14 @@ pub(crate) mod fake {
     }
 }
 
+/// How long `--help` may take. A cold start of an npm CLI under an antivirus
+/// scan takes seconds; a program that is not a CLI at all (a GUI typed into
+/// Settings' Path) never answers.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
+
 /// What `--help` says about the program at `path`, cached per (harness, path).
-/// A probe that could not run (an antivirus lock, an upgrade in place) is not
-/// an answer and is not cached, so the next attempt asks again.
+/// A probe that could not run or did not finish (an antivirus lock, an upgrade
+/// in place, a program that is not a CLI) is not an answer and is not cached.
 pub(crate) fn probe(h: Harness, path: &Path) -> Probe {
     let key = (h, path.to_path_buf());
     if let Some(p) = cache().lock().ok().and_then(|c| c.get(&key).copied()) {
@@ -500,8 +535,7 @@ pub(crate) fn probe(h: Harness, path: &Path) -> Probe {
     cmd.args(h.help_args())
         .env(crate::AGENT_CHILD_ENV, "1")
         .stdin(std::process::Stdio::null());
-    crate::process::hide_window(&mut cmd);
-    let Ok(out) = cmd.output() else {
+    let Ok(Some(out)) = crate::process::run_bounded(&mut cmd, PROBE_TIMEOUT) else {
         return Probe::read(h, false, "", "");
     };
     let probe = Probe::read(
@@ -541,6 +575,38 @@ mod tests {
         );
     }
 
+    /// An extension `CreateProcess` cannot start is never taken, wherever
+    /// `PATHEXT` lists it, and off Windows a name matches only exactly.
+    /// flip: `pick_executable` without its `STARTABLE` filter → fails at the first assertion.
+    #[test]
+    fn a_file_that_cannot_be_started_is_never_picked() {
+        let exts: Vec<String> = [".COM", ".PS1", ".CMD", ".EXE"].map(String::from).to_vec();
+        assert_eq!(
+            pick_executable("codex", &["codex", "codex.cmd", "codex.ps1"], &exts),
+            Some("codex.cmd")
+        );
+        assert_eq!(pick_executable("codex", &["codex.ps1"], &exts), None);
+        assert_eq!(pick_executable("claude", &["Claude"], &[]), None);
+    }
+
+    /// A dangling link and a file without an execute bit cannot be started.
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_link_or_a_plain_file_cannot_start() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("ondin-ai-start-{}", crate::run::random_tag()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let plain = dir.join("plain");
+        std::fs::write(&plain, "#!/bin/sh\n").unwrap();
+        assert!(!can_start(&plain));
+        std::fs::set_permissions(&plain, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(can_start(&plain));
+        let link = dir.join("link");
+        std::os::unix::fs::symlink(dir.join("gone"), &link).unwrap();
+        assert!(!can_start(&link));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// The newest Cursor version by date, then build time; other folders ignored.
     #[test]
     fn the_newest_cursor_version_wins() {
@@ -564,6 +630,59 @@ mod tests {
         let err = locate(Harness::Claude, Some(p)).unwrap_err();
         assert_eq!(err.program, "claude");
         assert_eq!(err.looked_in, vec![p.to_path_buf()]);
+    }
+
+    /// Not a test: the probe run by `a_probe_never_runs_a_program_planted_beside_ondin`
+    /// from a process whose working folder holds the planted program.
+    #[test]
+    #[ignore = "started by a probe test in a planted working folder"]
+    fn probe_from_a_planted_folder() {
+        if let Some(shim) = std::env::var_os("ONDIN_AI_PLANT_SHIM") {
+            probe(Harness::Codex, Path::new(&shim));
+        }
+    }
+
+    /// An npm-style shim probed while Ondin's working folder holds a `node.bat`
+    /// runs the real `node`, never the planted one. Two defences, each enough:
+    /// flip: `run_bounded` without its scratch `current_dir` and `Tracker::spawn`
+    /// without `NoDefaultCurrentDirectoryInExePath` → fails at the last assertion.
+    #[cfg(windows)]
+    #[test]
+    fn a_probe_never_runs_a_program_planted_beside_ondin() {
+        const GUARD: &str = "NoDefaultCurrentDirectoryInExePath";
+        let dir = std::env::temp_dir().join(format!("ondin-ai-plant-{}", crate::run::random_tag()));
+        let bin = dir.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(dir.join("node.bat"), "@echo planted> \"%~dp0marker\"\r\n").unwrap();
+        let shim = bin.join("fake.cmd");
+        std::fs::write(&shim, "@SET \"_prog=node\"\r\n@\"%_prog%\" --version\r\n").unwrap();
+        let marker = dir.join("marker");
+        // The fixture bites: run plainly from that folder, the shim runs the plant.
+        let plain = Command::new(&shim)
+            .current_dir(&dir)
+            .env_remove(GUARD)
+            .stdout(std::process::Stdio::null())
+            .status();
+        assert!(plain.is_ok());
+        assert!(marker.is_file(), "the planted node.bat ran");
+        std::fs::remove_file(&marker).unwrap();
+        let me = std::env::current_exe().unwrap();
+        let status = Command::new(me)
+            .args([
+                "find::tests::probe_from_a_planted_folder",
+                "--exact",
+                "--ignored",
+                "-q",
+            ])
+            .current_dir(&dir)
+            .env_remove(GUARD)
+            .env("ONDIN_AI_PLANT_SHIM", &shim)
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        assert!(!marker.exists(), "the probe ran the planted node.bat");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The environment override is named after the harness's key.

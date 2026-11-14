@@ -8,7 +8,7 @@
 
 use crate::find::{Launch, NotFound, launch, probe};
 use crate::harness::{self, ClaudeFlags, Harness, Seal, TurnSpec};
-use crate::process::Tracker;
+use crate::process::{Tracker, wait_bounded};
 use crate::stream::{LineKind, Parsed, StreamParser};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -33,6 +33,7 @@ const INHERITED_ENV_TO_CLEAR: &[&str] = &[
     "OPENCODE_CONFIG",
     "OPENCODE_CONFIG_CONTENT",
     "OPENCODE_CONFIG_DIR",
+    "OPENCODE_PERMISSION",
     "COPILOT_ALLOW_ALL",
     "COPILOT_ASSISTED_APPROVAL",
     "COPILOT_CUSTOM_INSTRUCTIONS_DIRS",
@@ -81,11 +82,13 @@ pub enum Refusal {
         why: String,
     },
     NoRunFolder(String),
-    /// The command line is longer than the platform takes.
+    /// The command line is longer than the platform takes; `what` names the
+    /// part that made it so.
     TooLong {
         total: usize,
         limit: usize,
         unit: &'static str,
+        what: &'static str,
     },
     Spawn(String),
     ConfigNotWritten(String),
@@ -109,11 +112,15 @@ impl std::fmt::Display for Refusal {
                 "Ondin could not make a private folder to run the agent in ({e}), so it did not \
                  start it."
             ),
-            Refusal::TooLong { total, limit, unit } => write!(
+            Refusal::TooLong {
+                total,
+                limit,
+                unit,
+                what,
+            } => write!(
                 f,
-                "What would be sent to the agent is too long for one command line ({total} \
-                 {unit}; this platform allows about {limit}); shorten the instructions in \
-                 Settings."
+                "This agent takes {what} on its command line, which would be {total} {unit} \
+                 long where it allows about {limit}; start a new chat or shorten it."
             ),
             Refusal::Spawn(e) => write!(f, "Ondin could not start the agent: {e}."),
             Refusal::ConfigNotWritten(e) => write!(
@@ -180,6 +187,9 @@ enum Prep {
     None,
     Antigravity,
     CursorApproval,
+    /// OpenCode merges configuration from places Ondin cannot list, so the
+    /// configuration it resolves is read back before the first turn.
+    OpenCodeCheck,
 }
 
 /// What a session's threads share.
@@ -392,6 +402,13 @@ impl Session {
     }
 }
 
+// Dropping a session can run `agy mcp remove` and scan Cursor's folder, so a
+// caller may drop it on a thread of its own; this keeps that possible.
+const _: fn() = || {
+    fn is_send<T: Send>() {}
+    is_send::<Session>();
+};
+
 impl Drop for Session {
     fn drop(&mut self) {
         let inner = &self.inner;
@@ -461,6 +478,11 @@ impl Setup {
                 let cfg = folder.join("mcp.json");
                 write(&cfg, harness::claude_mcp_config_json(&exe, args))?;
                 s.base.mcp_config = Some(path_str(&cfg));
+                if !config.system_prompt.trim().is_empty() {
+                    let sys = folder.join("system-prompt.md");
+                    write(&sys, config.system_prompt.clone())?;
+                    s.base.system_file = Some(path_str(&sys));
+                }
             }
             Harness::Codex => {
                 mkdir(&work)?;
@@ -481,10 +503,18 @@ impl Setup {
                     &dir.join("opencode.json"),
                     harness::opencode_config_json(&exe, args, allowed),
                 )?;
+                // `~/.opencode/opencode.json` is merged over everything else and
+                // no option turns it off; this variable moves only that home,
+                // not the data folder its sign-in lives in.
+                let home = folder.join("opencode-home");
+                mkdir(&home)?;
                 s.env
                     .push(("XDG_CONFIG_HOME".into(), root.into_os_string()));
                 s.env
                     .push(("OPENCODE_DISABLE_PROJECT_CONFIG".into(), "1".into()));
+                s.env
+                    .push(("OPENCODE_TEST_HOME".into(), home.into_os_string()));
+                s.prep = Prep::OpenCodeCheck;
             }
             Harness::Copilot => {
                 mkdir(&work)?;
@@ -613,26 +643,46 @@ impl Inner {
     }
 
     /// Refuse a command line the platform will not take, before spawning: the
-    /// OS's own error afterwards names neither cause.
+    /// OS's own error afterwards names neither cause. On Windows it is measured
+    /// as std will quote it, against `cmd.exe`'s shorter limit behind a shim.
     fn check_argv(&self, args: &[String]) -> Result<(), Refusal> {
-        let (limit, unit) = match cfg!(windows) {
-            true => (30_000, "characters"),
-            false => (120 * 1024, "bytes"),
-        };
-        let units = |a: &str| match cfg!(windows) {
-            true => a.encode_utf16().count(),
-            false => a.len(),
-        };
-        let total: usize = args.iter().map(|a| units(a) + 1).sum();
-        let longest = args.iter().map(|a| units(a)).max().unwrap_or(0);
-        if total > limit || longest > limit {
-            return Err(Refusal::TooLong { total, limit, unit });
-        }
         let program = launch(self.harness, &self.program).program;
         let ext = program
             .extension()
             .map(|e| e.to_string_lossy().to_ascii_lowercase());
         let batch = cfg!(windows) && matches!(ext.as_deref(), Some("cmd" | "bat"));
+        let (limit, unit) = match (cfg!(windows), batch) {
+            (true, true) => (8_000, "characters"),
+            (true, false) => (30_000, "characters"),
+            (false, _) => (120 * 1024, "bytes"),
+        };
+        let units = |a: &str| match cfg!(windows) {
+            true => quoted_len(a, batch),
+            false => a.len() + 1,
+        };
+        let total: usize =
+            units(&program.to_string_lossy()) + args.iter().map(|a| units(a)).sum::<usize>();
+        if total > limit {
+            let longest = args.iter().max_by_key(|a| a.len());
+            let system = self.base.system.trim();
+            // The system prompt rides with the message on a first turn: it is
+            // the cause when it is most of that argument.
+            let what = match longest {
+                Some(a)
+                    if !system.is_empty() && a.contains(system) && system.len() * 2 > a.len() =>
+                {
+                    "the system prompt, which carries the instructions in Settings and the \
+                     conversation so far"
+                }
+                _ => "your message",
+            };
+            return Err(Refusal::TooLong {
+                total,
+                limit,
+                unit,
+                what,
+            });
+        }
         if batch && args.iter().any(|a| a.contains('\n') || a.contains('\r')) {
             return Err(Refusal::Spawn(format!(
                 "{} resolved to a batch shim ({}), which Windows cannot give a multi-line \
@@ -695,6 +745,7 @@ impl Inner {
             Prep::None => Ok(()),
             Prep::Antigravity => crate::antigravity::Registration::install(
                 launch(self.harness, &self.program),
+                &self.program,
                 &self.run_root,
                 &self.mcp_exe,
                 &self.mcp_args,
@@ -711,6 +762,7 @@ impl Inner {
             .map_err(|e| {
                 Refusal::ConfigNotWritten(format!("Cursor did not approve Ondin's server: {e}"))
             }),
+            Prep::OpenCodeCheck => self.opencode_check(),
         };
         self.lock().prepared = Some(result.clone());
         result
@@ -794,6 +846,35 @@ impl Inner {
         }
     }
 
+    /// OpenCode's seal, read off the configuration it resolves with the
+    /// session's environment: only Ondin's server, and the agent's tools off.
+    fn opencode_check(&self) -> Result<(), Refusal> {
+        let refuse = |why: String| Refusal::Unsealed {
+            harness: Harness::OpenCode,
+            why,
+        };
+        let mut c = self.command(&self.with_prefix(vec!["debug".into(), "config".into()]));
+        c.stdin(Stdio::null());
+        let out = crate::process::run_bounded(&mut c, Duration::from_secs(30));
+        let text = match out {
+            Ok(Some(h)) if h.status.success() => String::from_utf8_lossy(&h.stdout).into_owned(),
+            _ => String::new(),
+        };
+        match harness::opencode_config_leaks(&text) {
+            None => Err(refuse(
+                "Ondin could not read the configuration OpenCode resolves, so it could not check \
+                 that it is sealed, and did not start it."
+                    .into(),
+            )),
+            Some(leaks) if leaks.is_empty() => Ok(()),
+            Some(leaks) => Err(refuse(format!(
+                "OpenCode's own configuration would still give this session more than Ondin's \
+                 tools ({}), so Ondin did not start it.",
+                leaks.join(", ")
+            ))),
+        }
+    }
+
     /// One turn on a per-turn harness: setup, spawn, read to the end.
     fn run_turn(self: Arc<Self>, turn: u64, spec: TurnSpec, args: Vec<String>) {
         let refused = self.prepare().and_then(|_| match self.harness {
@@ -836,8 +917,7 @@ impl Inner {
         let mut reader = Reader::new(self.harness);
         let mut ended = false;
         if let Some(out) = stdout {
-            for line in BufReader::new(out).lines() {
-                let Ok(line) = line else { break };
+            for line in lossy_lines(out) {
                 if self.read_line(turn, &mut reader, &line) && !ended {
                     ended = true;
                     // The turn is over; the child gets its grace to exit.
@@ -849,9 +929,6 @@ impl Inner {
             }
         }
         let code = wait_bounded(&self.tracker, &child, EXIT_GRACE);
-        if let Ok(c) = child.lock() {
-            self.tracker.forget(c.id());
-        }
         let stderr = stderr.join().unwrap_or_default();
         if !ended {
             let ev = self.exited(code, &reader.plain, &stderr);
@@ -998,8 +1075,7 @@ impl Inner {
         let stderr = collect(err, STDERR_KEPT);
         let mut reader = Reader::new(self.harness);
         if let Some(out) = out {
-            for line in BufReader::new(out).lines() {
-                let Ok(line) = line else { break };
+            for line in lossy_lines(out) {
                 let turn = self.lock().turn;
                 if self.in_flight.load(Ordering::Acquire) {
                     self.read_line(turn, &mut reader, &line);
@@ -1014,9 +1090,6 @@ impl Inner {
             }
         }
         let code = wait_bounded(&self.tracker, &child, EXIT_GRACE);
-        if let Ok(c) = child.lock() {
-            self.tracker.forget(c.id());
-        }
         let turn = {
             let mut st = self.lock();
             if st.generation == generation {
@@ -1127,6 +1200,58 @@ fn bare_name(qualified: &str) -> &str {
         .unwrap_or(qualified)
 }
 
+/// One argument's length in UTF-16 units on a Windows command line, with its
+/// separator: quoted when it holds a blank (always, for a batch file), each `"`
+/// escaped and the backslashes before it doubled, and for a batch file each
+/// `%` spelled as the eight-character escape std writes for it.
+fn quoted_len(a: &str, batch: bool) -> usize {
+    let mut n = 1;
+    let mut backslashes = 0;
+    for c in a.chars() {
+        match c {
+            '\\' => {
+                backslashes += 1;
+                n += 1;
+            }
+            '"' => {
+                n += backslashes + 2;
+                backslashes = 0;
+            }
+            '%' if batch => {
+                n += 8;
+                backslashes = 0;
+            }
+            c => {
+                n += c.len_utf16();
+                backslashes = 0;
+            }
+        }
+    }
+    if batch || a.is_empty() || a.contains([' ', '\t']) {
+        n += backslashes + 2;
+    }
+    n
+}
+
+/// A pipe's lines until it closes, each decoded lossily: a harness may print a
+/// diagnostic in the console's code page, and one bad byte must not end the
+/// turn's stream.
+fn lossy_lines(pipe: impl Read) -> impl Iterator<Item = String> {
+    let mut r = BufReader::new(pipe);
+    std::iter::from_fn(move || {
+        let mut buf = Vec::new();
+        match r.read_until(b'\n', &mut buf) {
+            Ok(0) | Err(_) => None,
+            Ok(_) => {
+                while buf.last().is_some_and(|b| *b == b'\n' || *b == b'\r') {
+                    buf.pop();
+                }
+                Some(String::from_utf8_lossy(&buf).into_owned())
+            }
+        }
+    })
+}
+
 /// Read a pipe to its end on a thread of its own, keeping at most `cap` bytes:
 /// a child blocked on a full pipe never exits.
 fn collect<R: Read + Send + 'static>(
@@ -1147,27 +1272,6 @@ fn collect<R: Read + Send + 'static>(
         }
         String::from_utf8_lossy(&kept).into_owned()
     })
-}
-
-/// Wait up to `grace` for `child` to exit, then kill its tree; its exit code.
-fn wait_bounded(tracker: &Tracker, child: &Mutex<Child>, grace: Duration) -> Option<i32> {
-    let until = Instant::now() + grace;
-    loop {
-        {
-            let mut c = child.lock().unwrap_or_else(|e| e.into_inner());
-            match c.try_wait() {
-                Ok(Some(s)) => return s.code(),
-                Ok(None) if Instant::now() >= until => {
-                    tracker.kill(&mut c);
-                    let _ = c.wait();
-                    return None;
-                }
-                Ok(None) => {}
-                Err(_) => return None,
-            }
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
 }
 
 /// Does a harness's dying output say it is not signed in?
@@ -1253,6 +1357,7 @@ mod tests {
                 total: 40_000,
                 limit: 30_000,
                 unit: "characters",
+                what: "your message",
             },
             Refusal::Spawn("x".into()),
             Refusal::ConfigNotWritten("x".into()),
@@ -1378,6 +1483,14 @@ mod tests {
                 say(
                     &serde_json::json!({"type":"item.completed","item":{"id":"i2","type":"agent_message","text":text}})
                         .to_string(),
+                );
+                say(r#"{"type":"turn.completed","usage":{"input_tokens":5,"output_tokens":2}}"#);
+            }
+            "code-page" => {
+                let mut out = std::io::stdout();
+                let _ = out.write_all(b"Fehler: Datei \xfcberall\r\n");
+                say(
+                    r#"{"type":"item.completed","item":{"id":"i2","type":"agent_message","text":"done"}}"#,
                 );
                 say(r#"{"type":"turn.completed","usage":{"input_tokens":5,"output_tokens":2}}"#);
             }
@@ -1540,6 +1653,65 @@ mod tests {
         assert_eq!(*code, Some(3));
         assert!(*signed_out);
         assert!(diagnostics.contains("Not logged in"));
+        drop(s);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A Windows command line is measured as std quotes it: a message of quote
+    /// marks, short when counted bare, is refused as too long and named.
+    /// flip: `quoted_len` counting `"` as one unit → fails at the escaped-quote
+    /// assertion, and with that removed at the `TooLong` match.
+    #[cfg(windows)]
+    #[test]
+    fn a_command_line_is_measured_as_quoted() {
+        assert_eq!(quoted_len("ab", false), 3);
+        assert_eq!(quoted_len("a b", false), 6);
+        assert_eq!(quoted_len(r#"a\"b"#, false), 7);
+        assert_eq!(quoted_len(r"a b\", false), 8);
+        assert_eq!(quoted_len("5%", true), 12);
+        let (mut s, root) = fake_session(Harness::OpenCode, "codex");
+        let r = s.send(Turn {
+            text: "\"".repeat(20_000),
+            images: Vec::new(),
+        });
+        assert!(
+            matches!(
+                r,
+                Err(Refusal::TooLong {
+                    what: "your message",
+                    ..
+                })
+            ),
+            "{r:?}"
+        );
+        drop(s);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A stdout line that is not UTF-8 is kept as a diagnostic, and the turn
+    /// still reads on to its end.
+    /// flip: `run_turn` reading `BufRead::lines` and breaking on an error →
+    /// fails at the `Diagnostic` assertion.
+    #[test]
+    fn a_line_in_another_code_page_does_not_end_the_turn() {
+        let (mut s, root) = fake_session(Harness::Codex, "code-page");
+        s.send(Turn::default()).unwrap();
+        let evs = until_idle(&mut s);
+        assert!(
+            evs.contains(&Event::Diagnostic("Fehler: Datei \u{fffd}berall".into())),
+            "{evs:?}"
+        );
+        assert!(evs.contains(&Event::Text("done".into())), "{evs:?}");
+        assert!(
+            matches!(
+                evs.last(),
+                Some(Event::Done {
+                    is_error: false,
+                    ..
+                })
+            ),
+            "{evs:?}"
+        );
         drop(s);
         let _ = std::fs::remove_dir_all(&root);
     }

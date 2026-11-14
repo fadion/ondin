@@ -20,12 +20,14 @@ mod stream;
 
 pub use find::{Found, NotFound, find, warm};
 pub use harness::{Harness, Seal};
+pub use process::process_running;
 pub use run::sweep;
 pub use session::{Config, Event, Refusal, Session, Turn};
 
 /// Set to `1` on every harness child, so `ondin` can refuse to run under one.
 pub const AGENT_CHILD_ENV: &str = "ONDIN_AGENT_CHILD";
 
-/// The name Ondin's MCP server is registered under in every harness; its tools
-/// reach Claude Code as `mcp__ondin__<tool>`.
+/// The name Ondin's MCP server is registered under; its tools reach Claude Code
+/// as `mcp__ondin__<tool>`. Antigravity's registry is the person's own, so a
+/// session there registers under this name and eight hex digits.
 pub const MCP_SERVER: &str = "ondin";

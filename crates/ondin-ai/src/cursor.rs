@@ -37,48 +37,18 @@ pub(crate) fn approve(
     }
     c.envs(env.iter().map(|(k, v)| (k, v)))
         .env(crate::AGENT_CHILD_ENV, "1")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    crate::process::hide_window(&mut c);
-    let mut child = c.spawn().map_err(|e| e.to_string())?;
-    // Both pipes drained while it runs: a child blocked on a full pipe never
-    // exits, and its message is the one worth showing.
-    let drain = |pipe: Option<Box<dyn std::io::Read + Send>>| {
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let mut buf = Vec::new();
-            if let Some(mut p) = pipe {
-                let _ = p.read_to_end(&mut buf);
-            }
-            let _ = tx.send(buf);
-        });
-        rx
+        .stdin(std::process::Stdio::null());
+    let Some(done) =
+        crate::process::run_bounded(&mut c, APPROVE_TIMEOUT).map_err(|e| e.to_string())?
+    else {
+        return Err("`cursor-agent mcp enable` did not finish".into());
     };
-    let out = drain(child.stdout.take().map(|p| Box::new(p) as _));
-    let err = drain(child.stderr.take().map(|p| Box::new(p) as _));
-    let started = std::time::Instant::now();
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(s)) => break s,
-            Ok(None) if started.elapsed() > APPROVE_TIMEOUT => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err("`cursor-agent mcp enable` did not finish".into());
-            }
-            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
-            Err(e) => return Err(e.to_string()),
-        }
-    };
+    let status = done.status;
     if status.success() {
         return Ok(());
     }
-    let text = |rx: std::sync::mpsc::Receiver<Vec<u8>>| {
-        rx.recv_timeout(Duration::from_secs(2))
-            .map(|b| String::from_utf8_lossy(&b).trim().to_string())
-            .unwrap_or_default()
-    };
-    let (stdout, stderr) = (text(out), text(err));
+    let text = |b: &[u8]| String::from_utf8_lossy(b).trim().to_string();
+    let (stdout, stderr) = (text(&done.stdout), text(&done.stderr));
     Err(match (stderr.is_empty(), stdout.is_empty()) {
         (false, _) => stderr,
         (true, false) => stdout,

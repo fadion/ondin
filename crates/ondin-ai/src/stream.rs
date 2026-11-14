@@ -160,6 +160,11 @@ pub(crate) struct StreamParser {
     /// Claude only: the turn has streamed text, so an error's reason starts a
     /// paragraph of its own.
     claude_spoke: bool,
+    /// Codex only: the last `error` notice, the reason of a `turn.failed`
+    /// that gives none.
+    codex_error: Option<String>,
+    /// The turn has said something, so a failure at its end is not silent.
+    turn_said: bool,
     last_line: LineKind,
 }
 
@@ -172,6 +177,8 @@ impl StreamParser {
             oc: OpenCodeTurn::default(),
             dsh: DshTurn::default(),
             claude_spoke: false,
+            codex_error: None,
+            turn_said: false,
             last_line: LineKind::Blank,
         }
     }
@@ -234,7 +241,7 @@ impl StreamParser {
             return Vec::new();
         };
         self.last_line = LineKind::Json;
-        let out = match self.harness {
+        let mut out = match self.harness {
             Harness::Claude => self.push_claude(&v),
             Harness::Codex => self.push_codex(&v),
             Harness::Antigravity => self.push_antigravity(&v),
@@ -243,11 +250,31 @@ impl StreamParser {
             Harness::Cursor => self.push_cursor(&v),
             Harness::DeepSeek => self.push_deepseek(&v),
         };
+        self.turn_said |= out
+            .iter()
+            .any(|e| matches!(e, Parsed::Text(t) if !t.trim().is_empty()));
+        // A failure with no reason in any dialect still says it failed:
+        // otherwise it reads as an empty, successful answer.
+        if let Some(at) = out
+            .iter()
+            .position(|e| matches!(e, Parsed::Done { is_error: true, .. }))
+            && !self.turn_said
+        {
+            out.insert(
+                at,
+                Parsed::Text(format!(
+                    "{} reported that this turn failed, without saying why.",
+                    self.harness.label()
+                )),
+            );
+        }
         if out.iter().any(|e| matches!(e, Parsed::Done { .. })) {
             self.seen.clear();
             self.text = Coalescer::default();
             self.oc = OpenCodeTurn::default();
             self.claude_spoke = false;
+            self.codex_error = None;
+            self.turn_said = false;
         }
         out
     }
@@ -303,12 +330,18 @@ impl StreamParser {
             }
             Some("result") => {
                 let is_error = v.get("is_error").and_then(|b| b.as_bool()) == Some(true);
+                // `error_during_execution` and its kin carry `errors`, not `result`.
+                let errors = blocks(v.get("errors"))
+                    .filter_map(|e| e.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n");
                 if is_error
                     && let Some(why) = v
                         .get("result")
                         .and_then(|r| r.as_str())
                         .map(str::trim)
                         .filter(|r| !r.is_empty())
+                        .or(Some(errors.trim()).filter(|e| !e.is_empty()))
                 {
                     out.push(Parsed::Text(match self.claude_spoke {
                         true => format!("\n\n{why}"),
@@ -316,10 +349,20 @@ impl StreamParser {
                     }));
                 }
                 let u = |p: &str| v.pointer(p).and_then(|n| n.as_u64());
+                // `input_tokens` leaves out cached input, which on a resumed
+                // turn is nearly all of it; the other dialects count it.
+                let input = [
+                    "input_tokens",
+                    "cache_read_input_tokens",
+                    "cache_creation_input_tokens",
+                ]
+                .iter()
+                .filter_map(|k| u(&format!("/usage/{k}")))
+                .reduce(|a, b| a + b);
                 out.push(Parsed::Done {
                     is_error,
                     duration_ms: u("/duration_ms"),
-                    input_tokens: u("/usage/input_tokens"),
+                    input_tokens: input,
                     output_tokens: u("/usage/output_tokens"),
                 });
             }
@@ -353,9 +396,22 @@ impl StreamParser {
                     output_tokens: u("output_tokens"),
                 }]
             }
-            "turn.failed" => failed(v.pointer("/error/message")),
-            // A fatal stream error: nothing follows, so it ends the turn.
-            "error" => failed(v.get("message")),
+            "turn.failed" => {
+                let said = v.pointer("/error/message").and_then(|m| m.as_str());
+                let why = said
+                    .filter(|m| !m.is_empty())
+                    .map(str::to_string)
+                    .or(self.codex_error.take());
+                failed(why.as_deref())
+            }
+            // Not the turn's end: Codex says it while it reconnects, and a
+            // fatal one is followed by `turn.failed` or by its exit. Kept for
+            // "Show details" and for a `turn.failed` that names nothing.
+            "error" => {
+                self.codex_error = Some(str_at(v, "message").to_string());
+                self.last_line = LineKind::Plain;
+                Vec::new()
+            }
             _ => Vec::new(),
         }
     }
@@ -467,9 +523,17 @@ impl StreamParser {
                             .to_string(),
                     ));
                 }
+                let is_error = str_at(r, "status") != "SUCCESS";
+                let why = r
+                    .get("error")
+                    .and_then(|e| e.as_str().or_else(|| e.get("message")?.as_str()))
+                    .filter(|w| !w.trim().is_empty());
+                if is_error && let Some(why) = why {
+                    out.push(Parsed::Text(format!("\n{}\n", why.trim())));
+                }
                 let u = |k: &str| r.pointer(&format!("/usage/{k}")).and_then(|n| n.as_u64());
                 out.push(Parsed::Done {
-                    is_error: str_at(r, "status") != "SUCCESS",
+                    is_error,
                     duration_ms: r
                         .get("duration_seconds")
                         .and_then(|d| d.as_f64())
@@ -488,13 +552,14 @@ impl StreamParser {
         let info = s.get("tool_info").unwrap_or(&serde_json::Value::Null);
         let params = info.get("parameters").unwrap_or(&serde_json::Value::Null);
         let raw = str_at(s, "tool_name");
+        // A session registers Ondin under a name of its own; it reads as Ondin's.
+        let server = match str_at(params, "ServerName") {
+            s if crate::harness::is_antigravity_session_server(s) => crate::MCP_SERVER,
+            s => s,
+        };
         let (name, input) = match raw {
             "call_mcp_tool" => (
-                format!(
-                    "mcp__{}__{}",
-                    str_at(params, "ServerName"),
-                    str_at(params, "ToolName")
-                ),
+                format!("mcp__{server}__{}", str_at(params, "ToolName")),
                 params.get("Arguments").cloned().unwrap_or_default(),
             ),
             _ => (raw.to_string(), params.clone()),
@@ -742,15 +807,22 @@ impl StreamParser {
                     (None, None) => None,
                     (a, b) => Some(a.unwrap_or(0) + b.unwrap_or(0)),
                 };
-                vec![Parsed::Done {
-                    is_error: v.get("is_error").and_then(|e| e.as_bool()) == Some(true)
-                        || v.get("subtype")
-                            .and_then(|s| s.as_str())
-                            .is_some_and(|s| s != "success"),
+                let is_error = v.get("is_error").and_then(|e| e.as_bool()) == Some(true)
+                    || v.get("subtype")
+                        .and_then(|s| s.as_str())
+                        .is_some_and(|s| s != "success");
+                let mut out = Vec::new();
+                // On success `result` restates the answer; on failure it is the reason.
+                if is_error && !str_at(v, "result").trim().is_empty() {
+                    out.push(Parsed::Text(format!("\n{}\n", str_at(v, "result").trim())));
+                }
+                out.push(Parsed::Done {
+                    is_error,
                     duration_ms: v.get("duration_ms").and_then(|d| d.as_u64()),
                     input_tokens: input,
                     output_tokens: at("outputTokens"),
-                }]
+                });
+                out
             }
             // `thinking`, and `user` (the prompt echoed).
             _ => Vec::new(),
@@ -955,9 +1027,9 @@ fn content_text(content: Option<&serde_json::Value>) -> (String, bool) {
 }
 
 /// A failed turn's reason, then its end.
-fn failed(message: Option<&serde_json::Value>) -> Vec<Parsed> {
+fn failed(message: Option<&str>) -> Vec<Parsed> {
     let mut out = Vec::new();
-    if let Some(m) = message.and_then(|m| m.as_str()).filter(|m| !m.is_empty()) {
+    if let Some(m) = message.filter(|m| !m.is_empty()) {
         out.push(Parsed::Text(format!("\n{m}\n")));
     }
     out.push(Parsed::Done {
@@ -1198,20 +1270,128 @@ mod tests {
         assert!(results(&evs)[0].2);
     }
 
-    /// A failed turn and a stream error both end the turn, saying why.
+    /// A failed turn ends the turn saying why, the reason taken from the last
+    /// `error` notice when `turn.failed` names none.
     #[test]
     fn codex_failures_end_the_turn() {
-        for line in [
-            r#"{"type":"turn.failed","error":{"message":"quota"}}"#,
-            r#"{"type":"error","message":"quota"}"#,
+        for lines in [
+            &[r#"{"type":"turn.failed","error":{"message":"quota"}}"#][..],
+            &[
+                r#"{"type":"error","message":"quota"}"#,
+                r#"{"type":"turn.failed","error":{}}"#,
+            ][..],
         ] {
-            let evs = drive(Harness::Codex, &[line]);
+            let evs = drive(Harness::Codex, lines);
             assert_eq!(text_of(&evs), "\nquota\n");
             assert!(matches!(
                 done(&evs),
                 Some(Parsed::Done { is_error: true, .. })
             ));
         }
+    }
+
+    /// Codex's `error` while it reconnects is a diagnostic, not the turn's end:
+    /// what follows is the answer, ended once by `turn.completed`.
+    /// flip: `push_codex`'s `error` arm returning `failed(…)` → fails at the `Done` count.
+    #[test]
+    fn a_codex_retry_notice_does_not_end_the_turn() {
+        let mut p = StreamParser::new(Harness::Codex);
+        let mut evs = p.push(r#"{"type":"error","message":"Reconnecting... 1/5"}"#);
+        assert_eq!(p.last_line(), LineKind::Plain);
+        evs.extend(p.push(CODEX_REAL_TOOL_CYCLE[3]));
+        evs.extend(p.push(CODEX_REAL_TOOL_CYCLE[4]));
+        let ends = evs
+            .iter()
+            .filter(|e| matches!(e, Parsed::Done { .. }))
+            .count();
+        assert_eq!(ends, 1, "{evs:?}");
+        assert_eq!(text_of(&evs), "One frame.");
+        assert!(matches!(
+            done(&evs),
+            Some(Parsed::Done {
+                is_error: false,
+                ..
+            })
+        ));
+    }
+
+    /// A failure with no reason text says that it failed, in every dialect
+    /// that can send one; Claude's `errors` and Cursor's `result` are read.
+    /// flip: `push` without its silent-failure insert → fails at the Copilot text.
+    #[test]
+    fn a_failure_without_a_reason_still_says_it_failed() {
+        let evs = drive(
+            Harness::Copilot,
+            &[r#"{"type":"result","sessionId":"s","exitCode":1}"#],
+        );
+        assert_eq!(
+            text_of(&evs),
+            "GitHub Copilot reported that this turn failed, without saying why."
+        );
+        let evs = drive(
+            Harness::Claude,
+            &[
+                r#"{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["tool crashed"]}"#,
+            ],
+        );
+        assert_eq!(text_of(&evs), "tool crashed");
+        let evs = drive(
+            Harness::Cursor,
+            &[r#"{"type":"result","subtype":"error","is_error":true,"result":"rate limited"}"#],
+        );
+        assert_eq!(text_of(&evs), "\nrate limited\n");
+        let evs = drive(
+            Harness::Antigravity,
+            &[r#"{"event":"result","result":{"status":"ERROR","error":{"message":"quota"}}}"#],
+        );
+        assert_eq!(text_of(&evs), "\nquota\n");
+        // Something said earlier in the turn is enough.
+        let evs = drive(
+            Harness::Copilot,
+            &[
+                r#"{"type":"assistant.message_delta","data":{"messageId":"m","deltaContent":"Hi"}}"#,
+                r#"{"type":"result","exitCode":1}"#,
+            ],
+        );
+        assert_eq!(text_of(&evs), "Hi");
+    }
+
+    /// An Antigravity call to the session's own registration reads as Ondin's;
+    /// one to the person's own server keeps its name.
+    #[test]
+    fn an_antigravity_session_server_reads_as_ondins() {
+        let call = |server: &str| {
+            format!(
+                r#"{{"event":"step_update","step_update":{{"step_index":4,"state":"ACTIVE","step_type":"tool","tool_name":"call_mcp_tool","tool_info":{{"name":"call_mcp_tool","parameters":{{"Arguments":{{}},"ServerName":"{server}","ToolName":"get_node"}}}}}}}}"#
+            )
+        };
+        let evs = drive(Harness::Antigravity, &[&call("ondin0123abcd")]);
+        assert_eq!(calls(&evs)[0].1, "mcp__ondin__get_node");
+        let evs = drive(Harness::Antigravity, &[&call("fs")]);
+        assert_eq!(calls(&evs)[0].1, "mcp__fs__get_node");
+    }
+
+    /// Claude's input tokens include cached input, as the other dialects' do.
+    /// flip: reading only `input_tokens` → fails at the assertion.
+    #[test]
+    fn claude_input_tokens_include_the_cache() {
+        let evs = drive(
+            Harness::Claude,
+            &[
+                r#"{"type":"result","is_error":false,"usage":{"input_tokens":4,"cache_read_input_tokens":38000,"cache_creation_input_tokens":2000,"output_tokens":300}}"#,
+            ],
+        );
+        assert!(
+            matches!(
+                done(&evs),
+                Some(Parsed::Done {
+                    input_tokens: Some(40_004),
+                    output_tokens: Some(300),
+                    ..
+                })
+            ),
+            "{evs:?}"
+        );
     }
 
     const AGY_REAL_TOOL_CYCLE: &[&str] = &[

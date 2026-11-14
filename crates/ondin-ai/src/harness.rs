@@ -344,6 +344,9 @@ pub(crate) struct ClaudeFlags {
     pub tools: bool,
     pub setting_sources: bool,
     pub strict_mcp_config: bool,
+    /// `--append-system-prompt-file`, which keeps the system prompt (and the
+    /// conversation it replays) off the length-limited, world-readable argv.
+    pub system_prompt_file: bool,
 }
 
 impl ClaudeFlags {
@@ -353,6 +356,7 @@ impl ClaudeFlags {
         tools: true,
         setting_sources: true,
         strict_mcp_config: true,
+        system_prompt_file: true,
     };
 }
 
@@ -383,6 +387,9 @@ impl Probe {
                     tools: mentions_flag(&both, "--tools"),
                     setting_sources: mentions_flag(&both, "--setting-sources"),
                     strict_mcp_config: mentions_flag(&both, "--strict-mcp-config"),
+                    // Listed only inside another flag's text, as `[-file]`.
+                    system_prompt_file: both.contains("--append-system-prompt[-file]")
+                        || mentions_flag(&both, "--append-system-prompt-file"),
                 },
                 false => ClaudeFlags::ALL,
             },
@@ -527,6 +534,8 @@ pub(crate) struct TurnSpec {
     pub effort: String,
     /// The conversation to continue, from the previous turn's stream.
     pub resume: Option<String>,
+    /// `system`, written to a file in the run folder for Claude Code.
+    pub system_file: Option<String>,
     /// The file the harness reads Ondin's server from: Claude's `--mcp-config`,
     /// Copilot's `--additional-mcp-config`, DeepSeek's `--patch` overlay.
     pub mcp_config: Option<String>,
@@ -619,8 +628,14 @@ pub(crate) fn session_args(h: Harness, spec: &TurnSpec, flags: ClaudeFlags) -> V
             if let Some(id) = resume {
                 a.extend(["--resume".into(), id.into()]);
             }
-            if !spec.system.trim().is_empty() {
-                a.extend(["--append-system-prompt".into(), spec.system.clone()]);
+            match spec.system_file.as_deref() {
+                Some(file) if flags.system_prompt_file => {
+                    a.extend(["--append-system-prompt-file".into(), file.into()]);
+                }
+                _ if !spec.system.trim().is_empty() => {
+                    a.extend(["--append-system-prompt".into(), spec.system.clone()]);
+                }
+                _ => {}
             }
             if let Some(cfg) = spec.mcp_config.as_deref() {
                 a.extend(["--mcp-config".into(), cfg.into()]);
@@ -873,8 +888,9 @@ fn opencode_sealed_tools() -> serde_json::Map<String, serde_json::Value> {
 }
 
 /// The `opencode.json` that seals an OpenCode session and gives it Ondin's
-/// server. `mcp` is assigned, and `XDG_CONFIG_HOME` pointing at the folder that
-/// holds this file keeps the person's own servers out of the resolved config.
+/// server. `XDG_CONFIG_HOME` pointing at the folder that holds this file and
+/// `OPENCODE_TEST_HOME` at an empty one keep the person's files out; the
+/// resolved result is checked with [`opencode_config_leaks`] before a turn.
 pub(crate) fn opencode_config_json(exe: &str, args: &[String], allowed: &[String]) -> String {
     let mut command = vec![exe.to_string()];
     command.extend(args.iter().cloned());
@@ -895,6 +911,56 @@ pub(crate) fn opencode_config_json(exe: &str, args: &[String], allowed: &[String
         }
     })
     .to_string()
+}
+
+/// What in `opencode debug config`'s output reaches past Ondin's tools: an MCP
+/// server other than Ondin's, or a tool or permission the sealed agent allows.
+/// `None` when the output is not a configuration at all.
+pub(crate) fn opencode_config_leaks(output: &str) -> Option<Vec<String>> {
+    let json = &output[output.find('{')?..];
+    let v: serde_json::Value = serde_json::Deserializer::from_str(json)
+        .into_iter()
+        .next()?
+        .ok()?;
+    let agent = v.pointer(&format!("/agent/{OPENCODE_AGENT}"))?;
+    let mut leaks = Vec::new();
+    for (name, server) in v
+        .get("mcp")
+        .and_then(|m| m.as_object())
+        .into_iter()
+        .flatten()
+    {
+        let enabled = server.get("enabled").and_then(|e| e.as_bool()) != Some(false);
+        if name != MCP_SERVER && enabled {
+            leaks.push(format!("the MCP server {name}"));
+        }
+    }
+    for (tool, on) in agent
+        .get("tools")
+        .and_then(|t| t.as_object())
+        .into_iter()
+        .flatten()
+    {
+        if on.as_bool() != Some(false) {
+            leaks.push(format!("its {tool} tool"));
+        }
+    }
+    let allows = |v: &serde_json::Value| match v {
+        serde_json::Value::String(s) => s != "deny",
+        serde_json::Value::Object(m) => m.values().any(|x| x.as_str() != Some("deny")),
+        _ => true,
+    };
+    for (what, rule) in agent
+        .get("permission")
+        .and_then(|p| p.as_object())
+        .into_iter()
+        .flatten()
+    {
+        if allows(rule) && !leaks.iter().any(|l| l == &format!("its {what} tool")) {
+            leaks.push(format!("its {what} permission"));
+        }
+    }
+    Some(leaks)
 }
 
 /// `-c` overrides giving Codex Ondin's server and only Ondin's: the whole
@@ -1213,21 +1279,36 @@ pub(crate) fn dsh_dump_is_headless(dump: &str) -> bool {
     })
 }
 
-/// The `permissions.allow` rules Antigravity needs to run Ondin's tools, one
-/// per granted tool. Headless it cannot ask, so a tool with no rule is denied
-/// and the turn still reports success with an empty answer.
-pub(crate) fn antigravity_allow_rules(allowed: &[String]) -> Vec<String> {
+/// The name one Antigravity session registers Ondin's server under: `ondin`
+/// and eight hex digits, never the person's own `ondin`, so a session never
+/// replaces or removes a registration it did not make.
+pub(crate) fn antigravity_server_name(tag: &str) -> String {
+    format!("{MCP_SERVER}{}", &tag[..tag.len().min(8)])
+}
+
+/// Is `name` a session's own registration, as [`antigravity_server_name`] makes it?
+pub(crate) fn is_antigravity_session_server(name: &str) -> bool {
+    name.strip_prefix(MCP_SERVER).is_some_and(|t| {
+        t.len() == 8
+            && t.bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    })
+}
+
+/// The `permissions.allow` rules Antigravity needs to run Ondin's tools under
+/// `server`, one per granted tool. Headless it cannot ask, so a tool with no
+/// rule is denied and the turn still reports success with an empty answer.
+pub(crate) fn antigravity_allow_rules(server: &str, allowed: &[String]) -> Vec<String> {
     allowed
         .iter()
-        .map(|t| format!("mcp({MCP_SERVER}/{t})"))
+        .map(|t| format!("mcp({server}/{t})"))
         .collect()
 }
 
-/// Is `rule` one Ondin grants? Every `mcp(ondin/…)` rule is, whatever level
-/// granted it; one the person wrote by hand for an Ondin tool is
-/// indistinguishable and goes too, which is better than a grant nobody remembers.
-fn is_ondin_rule(rule: &str) -> bool {
-    rule.starts_with(&format!("mcp({MCP_SERVER}/"))
+/// Is `rule` one this session's registration grants? Only rules naming its own
+/// server are: the person's `mcp(ondin/…)` rules are theirs.
+fn is_ondin_rule(rule: &str, server: &str) -> bool {
+    rule.starts_with(&format!("mcp({server}/"))
 }
 
 /// What a settings surgery asks its caller to do. `Unchanged` writes nothing:
@@ -1239,11 +1320,12 @@ pub(crate) enum SettingsEdit {
     Write(String),
 }
 
-/// Make Antigravity's `settings.json` grant exactly `rules` of Ondin's, every
+/// Make Antigravity's `settings.json` grant exactly `rules` for `server`, every
 /// other rule and key kept. `None` when the file is not a JSON object: losing
 /// the person's file is worse than a session without tools.
 pub(crate) fn antigravity_settings_with_only(
     current: &str,
+    server: &str,
     rules: &[String],
 ) -> Option<SettingsEdit> {
     let mut doc = parse_settings(current)?;
@@ -1260,7 +1342,7 @@ pub(crate) fn antigravity_settings_with_only(
         let before = arr.len();
         arr.retain(|v| {
             !v.as_str()
-                .is_some_and(|s| is_ondin_rule(s) && !rules.iter().any(|r| r == s))
+                .is_some_and(|s| is_ondin_rule(s, server) && !rules.iter().any(|r| r == s))
         });
         changed |= arr.len() != before;
         for r in rules {
@@ -1277,16 +1359,16 @@ pub(crate) fn antigravity_settings_with_only(
     Some(SettingsEdit::Write(render_settings(doc)?))
 }
 
-/// Withdraw every Ondin rule from Antigravity's `settings.json`. Only the
+/// Withdraw every rule for `server` from Antigravity's `settings.json`. Only the
 /// containers this call emptied are pruned; an `allow: []` the person had stays.
-pub(crate) fn antigravity_settings_without(current: &str) -> Option<SettingsEdit> {
+pub(crate) fn antigravity_settings_without(current: &str, server: &str) -> Option<SettingsEdit> {
     let mut doc = parse_settings(current)?;
     let mut removed = false;
     if let Some(perms) = doc.get_mut("permissions").and_then(|p| p.as_object_mut()) {
         let mut emptied = false;
         if let Some(arr) = perms.get_mut("allow").and_then(|a| a.as_array_mut()) {
             let before = arr.len();
-            arr.retain(|v| !v.as_str().is_some_and(is_ondin_rule));
+            arr.retain(|v| !v.as_str().is_some_and(|s| is_ondin_rule(s, server)));
             removed = arr.len() != before;
             emptied = removed && arr.is_empty();
         }
@@ -1374,6 +1456,7 @@ mod tests {
   --setting-sources <sources>           Comma-separated list of setting sources
   --strict-mcp-config                   Only use MCP servers from --mcp-config,
   --tools <tools...>                    Specify the list of available tools from
+                                        --append-system-prompt[-file], --add-dir
   -h, --help                            Display help for command";
 
     /// Claude's grade turns on `--tools`, and an unreadable probe is `Unknown`
@@ -1444,6 +1527,56 @@ mod tests {
         for never in ["--dangerously-skip-permissions", "bypassPermissions"] {
             assert!(!a.iter().any(|x| x == never));
         }
+    }
+
+    /// OpenCode's resolved configuration is read for what it adds: another
+    /// server, a tool switched back on, a permission allowed. Fixture shapes are
+    /// `opencode debug config` output from 1.19.5.
+    /// flip: `opencode_config_leaks` skipping the `mcp` loop → fails at the first `assert_eq`.
+    #[test]
+    fn opencode_leaks_are_read_off_its_resolved_config() {
+        let leaky = r#"{"mcp":{"ondin":{"type":"local","enabled":true,"command":["ondin"]},
+            "fs":{"type":"local","enabled":true,"command":["npx"]}},
+            "agent":{"ondin":{"mode":"primary","tools":{"bash":true,"read":false},
+            "permission":{"bash":"allow","read":"deny"}}}}"#;
+        assert_eq!(
+            opencode_config_leaks(leaky),
+            Some(vec!["the MCP server fs".into(), "its bash tool".into()])
+        );
+        let sealed = r#"{"mcp":{"ondin":{"enabled":true},"off":{"enabled":false}},
+            "agent":{"ondin":{"tools":{"bash":false},
+            "permission":{"bash":"deny","edit":{"*":"deny"}}}}}"#;
+        assert_eq!(opencode_config_leaks(sealed), Some(Vec::new()));
+        let opened = r#"{"agent":{"ondin":{"permission":{"webfetch":"ask"}}}}"#;
+        assert_eq!(
+            opencode_config_leaks(opened),
+            Some(vec!["its webfetch permission".into()])
+        );
+        assert_eq!(opencode_config_leaks("Error: unknown command"), None);
+        assert_eq!(opencode_config_leaks(r#"{"agent":{}}"#), None);
+    }
+
+    /// A build that reads the system prompt from a file gets the file, and the
+    /// prompt's text is nowhere on its command line; an older build gets the text.
+    /// flip: `session_args` ignoring `system_file` → fails at the first `!any`.
+    #[test]
+    fn claude_takes_its_system_prompt_from_a_file_where_it_can() {
+        let mut s = spec();
+        s.system_file = Some("sys.md".into());
+        let flags = Probe::read(Harness::Claude, true, CLAUDE_HELP, "").claude;
+        assert!(flags.system_prompt_file);
+        let a = session_args(Harness::Claude, &s, flags);
+        assert!(!a.iter().any(|x| x.contains(&s.system)));
+        let at = a
+            .iter()
+            .position(|x| x == "--append-system-prompt-file")
+            .unwrap();
+        assert_eq!(a[at + 1], "sys.md");
+        let help = "  --append-system-prompt <prompt>\n  -h, --help";
+        let old = Probe::read(Harness::Claude, true, help, "").claude;
+        assert!(!old.system_prompt_file);
+        let a = session_args(Harness::Claude, &s, old);
+        assert!(a.contains(&s.system));
     }
 
     /// A resumed Codex turn has no `--sandbox` (absent from `exec resume`), the
@@ -1603,48 +1736,78 @@ mod tests {
         assert!(!dsh_dump_is_headless(""));
     }
 
-    /// Granting replaces Ondin's previous rules with exactly this level's and
-    /// keeps the person's; granting the same again writes nothing.
+    /// Granting replaces this session's previous rules with exactly this
+    /// level's and keeps everyone else's, the person's `mcp(ondin/…)` included;
+    /// granting the same again writes nothing.
+    /// flip: `is_ondin_rule` matching any `mcp(ondin` prefix → fails at the allow list.
     #[test]
     fn antigravity_rules_describe_the_level() {
-        let cur = r#"{"permissions":{"allow":["mcp(ondin/set_fills)","mcp(mine/x)"]},"trustedWorkspaces":["a"]}"#;
-        let rules = antigravity_allow_rules(&["get_node".into()]);
-        let SettingsEdit::Write(next) = antigravity_settings_with_only(cur, &rules).unwrap() else {
+        let me = antigravity_server_name("0123abcd");
+        assert_eq!(me, "ondin0123abcd");
+        let cur = r#"{"permissions":{"allow":["mcp(ondin0123abcd/set_fills)","mcp(ondin/set_fills)","mcp(mine/x)"]},"trustedWorkspaces":["a"]}"#;
+        let rules = antigravity_allow_rules(&me, &["get_node".into()]);
+        let SettingsEdit::Write(next) = antigravity_settings_with_only(cur, &me, &rules).unwrap()
+        else {
             panic!("should write");
         };
         let v: serde_json::Value = serde_json::from_str(&next).unwrap();
         assert_eq!(
             v.pointer("/permissions/allow").unwrap(),
-            &serde_json::json!(["mcp(mine/x)", "mcp(ondin/get_node)"])
+            &serde_json::json!([
+                "mcp(ondin/set_fills)",
+                "mcp(mine/x)",
+                "mcp(ondin0123abcd/get_node)"
+            ])
         );
         assert_eq!(v["trustedWorkspaces"], serde_json::json!(["a"]));
         assert_eq!(
-            antigravity_settings_with_only(&next, &rules),
+            antigravity_settings_with_only(&next, &me, &rules),
             Some(SettingsEdit::Unchanged)
         );
-        assert_eq!(antigravity_settings_with_only("[1]", &rules), None);
+        assert_eq!(antigravity_settings_with_only("[1]", &me, &rules), None);
     }
 
     /// Withdrawing prunes only what it emptied, and writes nothing when there
-    /// was nothing of Ondin's.
+    /// was nothing of this session's.
     #[test]
     fn antigravity_withdraw_prunes_only_what_it_emptied() {
-        let SettingsEdit::Write(next) =
-            antigravity_settings_without(r#"{"permissions":{"allow":["mcp(ondin/get_node)"]}}"#)
-                .unwrap()
-        else {
+        let me = "ondin0123abcd";
+        let SettingsEdit::Write(next) = antigravity_settings_without(
+            r#"{"permissions":{"allow":["mcp(ondin0123abcd/get_node)"]}}"#,
+            me,
+        )
+        .unwrap() else {
             panic!("should write");
         };
         assert_eq!(next.trim(), "{}");
-        let theirs = r#"{"permissions":{"allow":[]}}"#;
-        assert_eq!(
-            antigravity_settings_without(theirs),
-            Some(SettingsEdit::Unchanged)
-        );
-        assert_eq!(
-            antigravity_settings_without(""),
-            Some(SettingsEdit::Unchanged)
-        );
+        for theirs in [
+            r#"{"permissions":{"allow":[]}}"#,
+            r#"{"permissions":{"allow":["mcp(ondin/get_node)"]}}"#,
+            "",
+        ] {
+            assert_eq!(
+                antigravity_settings_without(theirs, me),
+                Some(SettingsEdit::Unchanged)
+            );
+        }
+    }
+
+    /// A session's server name is recognised; the person's `ondin` and other
+    /// names are not.
+    #[test]
+    fn a_session_server_name_is_ours_alone() {
+        assert!(is_antigravity_session_server(&antigravity_server_name(
+            "deadbeef00"
+        )));
+        for theirs in [
+            "ondin",
+            "ondinDEADBEEF",
+            "ondin-deadbeef",
+            "ondindeadbee",
+            "fs",
+        ] {
+            assert!(!is_antigravity_session_server(theirs), "{theirs}");
+        }
     }
 
     /// Every sentence names a harness, says where foreign servers reach the

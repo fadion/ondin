@@ -835,9 +835,9 @@ impl OndinApp {
                     details,
                 }));
                 // A child that died takes its thread with it; the next question
-                // starts a session and replays the prose.
-                a.live = None;
-                a.look = None;
+                // starts a session and replays the prose. Ended as any session
+                // is, so its withdrawal runs off the UI thread.
+                a.end_session(None);
                 if !a.open {
                     a.unseen = true;
                 }

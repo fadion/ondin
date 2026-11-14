@@ -123,8 +123,9 @@ name (`claude`) and a speaker name (*Claude*) shown on its replies. An unknown s
   `--resume <session id>`. The turn ends only when the harness reports `Event::Stopped`; until then
   the send button reads *Stopping…*, disabled, and then a note says *Stopped. The next question
   resumes the session.*
-- **A harness that exits before answering drops the session**: the next question starts a new one,
-  with the thread's prose replayed as a restored conversation is.
+- **A harness that exits before answering ends the session** as any ending does (the grant revoked
+  at once, the rest off the UI thread): the next question starts a new one, with the thread's prose
+  replayed as a restored conversation is.
 - **A stale stream is discarded.** Every event is tagged with its turn and dropped once a newer turn
   has begun, and a session the person has left (switched document, changed settings) is dropped
   whole.

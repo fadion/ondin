@@ -8,12 +8,10 @@ true.
 
 ## Now · MCP
 
-Fewer tokens and fewer round trips for an agent driving `ondin-mcp`. Measured on a live run (a
-hero section built into an existing page): `tools/list` is 164 tools and ~119 KB, a third of it
-the same `base_rev` and results-are-data text repeated per tool; learning the page's type and
-colours took about ten reads; the one `insert_subtree` was 13 KB of output, most of it float
-colours, stroke fields at their defaults and hand-placed coordinates. Each item lands with a size
-budget test, and the set is checked by re-running the same agent task on the old and new build.
+Fewer tokens and fewer round trips for an agent driving `ondin-mcp`. `tools/list` names the core
+set (`ondin_mcp::tools::CORE`), and `schema`'s `the_tool_list_stays_within_its_budget` holds it
+and the whole list to byte budgets. Each item lands with a size budget test, and the set is checked
+by re-running the same agent task on the old and new build.
 
 - **Short ids per client** — `n36` for `48c991654e6b8e81:36`, mapped per client key, surviving the
   proxy's reconnect.

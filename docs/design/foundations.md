@@ -83,10 +83,15 @@ ondin/
    ├─ ondin-core/            # headless engine: model, ops, history, resolve, text layout, io
    ├─ ondin-render/          # ScenePainter + Vello GPU impl + vello_cpu impl
    ├─ ondin-export/          # SVG, PDF, PNG, JPEG, WebP, JSON snapshot; code export (HTML/CSS, React, Vue); export plan and zip
-   ├─ ondin-mcp/             # MCP server: socket listener, tool dispatch, stdio proxy
+   ├─ ondin-mcp/             # MCP adapter: the wire, the tool table and schemas, the queue
    ├─ ondin-ai/              # the assistant's agent harnesses: find, seal, spawn, decode
    └─ ondin-app/             # `ondin` binary: GUI shell, tools, panels, `serve`/`export` subcommands
+      └─ src/
+         ├─ mcp/             # the MCP host: engine and handlers, window and `serve` hosts, endpoint, proxy, grants
+         └─ assistant/       # the assistant panel, its thread and prompt
 ```
+
+The MCP host lives in the app because its handlers commit through `EditorSession`, which is the app's (`mcp.md`, *The commit door*); `ondin-mcp` holds only what a host and a client share.
 
 Dependency graph (acyclic):
 
@@ -104,14 +109,14 @@ ondin-app    ← ondin-core, ondin-render, ondin-export, ondin-mcp, ondin-ai
 
 ### Allowed-dependency rules
 
-- `ondin-core` MUST NOT depend on `vello*`, `wgpu`, `winit`, `egui`, or any GPU/windowing/UI crate. It must build and pass all tests with no graphics context. Permitted: `kurbo`, `peniko`, `parley` (CPU-only text layout; needed for text bounds, hit-testing and the editing cursor), `rstar`, `serde`, `serde_json`, `rustc-hash`, `thiserror`, `base64` (embedded image bytes), `roxmltree` (XML half of SVG import), `regex` (batch rename's Find), `skrifa` and `read-fonts` (font tables read directly), `flo_curves` (boolean solver), `i_overlay` (`=`-pinned; the polygon arithmetic behind *Offset path* and *Outline stroke*), `taffy` (`=`-pinned, features as above). This list must stay set-equal to `ondin-core/Cargo.toml`; `deps_forbidden.rs` holds a copy (`CORE_PERMITTED`) and fails when the manifest differs, while the transitive tree is still checked against a denylist.
+- `ondin-core` MUST NOT depend on `vello*`, `wgpu`, `winit`, `egui`, or any GPU/windowing/UI crate. It must build and pass all tests with no graphics context. Permitted: `kurbo`, `peniko`, `parley` (CPU-only text layout; needed for text bounds, hit-testing and the editing cursor), `rstar`, `serde`, `serde_json`, `rustc-hash`, `thiserror`, `base64` (embedded image bytes), `roxmltree` (XML half of SVG import), `regex` (batch rename's Find), `serde_path_to_error` and `serde_ignored` (a verb's model argument refused naming where it went wrong, and an unknown field refused rather than dropped), `skrifa` and `read-fonts` (font tables read directly), `flo_curves` (boolean solver), `i_overlay` (`=`-pinned; the polygon arithmetic behind *Offset path* and *Outline stroke*), `taffy` (`=`-pinned, features as above). This list must stay set-equal to `ondin-core/Cargo.toml`; `deps_forbidden.rs` holds a copy (`CORE_PERMITTED`) and fails when the manifest differs, while the transitive tree is still checked against a denylist.
 - Only `ondin-render` may depend on `vello` and `vello_cpu`. `wgpu` is shared with `ondin-app` because the GPU backend takes wgpu types and eframe owns the device.
 - Only `ondin-app` may depend on `egui`/`winit`.
-- `ondin-mcp` contains no rendering or UI dependency.
+- `ondin-mcp` and `ondin-ai` contain no rendering or UI dependency.
 
 ### Enforcement
 
-`ondin-core/tests/deps_forbidden.rs` inspects the transitive `cargo tree`, read `--workspace` rather than `-p` (with `resolver = "3"` these resolve differently, and every compiling gate resolves workspace-wide). It is a table, `RULES`, one row per rule a dependency tree can express: `ondin-core` and `ondin-mcp` against the headless list; `ondin-render` and `ondin-export` against a second, UI-only list (separate because `glutin_wgl_sys` arrives legitimately under `wgpu-hal` there). The tree is walked once per row.
+`ondin-core/tests/deps_forbidden.rs` inspects the transitive `cargo tree`, read `--workspace` rather than `-p` (with `resolver = "3"` these resolve differently, and every compiling gate resolves workspace-wide). It is a table, `RULES`, one row per rule a dependency tree can express: `ondin-core`, `ondin-mcp` and `ondin-ai` against the headless list; `ondin-render` and `ondin-export` against a second, UI-only list (separate because `glutin_wgl_sys` arrives legitimately under `wgpu-hal` there). The tree is walked once per row.
 
 The vello rule is a separate test, `only_ondin_render_declares_vello`, which reads manifests: it is about what a crate may declare, not what a tree may contain. Neither test can express the other's rule.
 

@@ -85,7 +85,7 @@ a **tangent**, a **perpendicular**, a segment's **midpoint**, a shape's **centre
 point **on a path**. Tangent and perpendicular are drawn from `Outlines::from`, the anchors the
 dragged point is joined to: the pen run's last anchor (a Ctrl-moved anchor's neighbours), a line's
 other end, a node-tool anchor's neighbours that stay put. A tangent is where a line from one of
-them touches a curve (none on a straight segment); a perpendicular is that line's foot on a
+them touches a curve (none on a straight segment, nor on a curve whose handles lie on its chord within `STRAIGHT_EPS`, 1e-6, where every sample would otherwise be a root); a perpendicular is that line's foot on a
 segment, curves included, kept only on the segment. Both are roots of a cross or dot product
 along the segment (`snap::roots_on`); one at the `from` anchor itself names no direction and is
 dropped. A first anchor and a segment drag have no `from`, so neither kind. The first kind

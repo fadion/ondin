@@ -59,11 +59,18 @@ name (`claude`) and a speaker name (*Claude*) shown on its replies. An unknown s
   would be signed out.
 - **Cursor needs its server approved** (`cursor-agent mcp enable`) before the first turn; a failed
   approval refuses the turn.
+- **OpenCode reads its configuration from the session**: `XDG_CONFIG_HOME` at the session's
+  `opencode.json`, project config off, and `OPENCODE_TEST_HOME` at an empty folder, since
+  `~/.opencode/opencode.json` is merged over everything and no option turns it off. Because it
+  merges from places Ondin cannot list, `opencode debug config` is read back before the first turn,
+  and another enabled server, or a tool or permission the sealed agent allows, refuses the session.
 - **Antigravity is configured globally**: its server is registered in the person's own registry and
   its allow rules written into its `settings.json`, both installed with the session and withdrawn
-  when it ends, under a claim marker naming the live Ondin that holds them. A session is refused
-  while another live Ondin holds the registration. Granting or withdrawing removes every
-  `mcp(ondin/…)` rule, a hand-written one included. While a session holds them, an `agy` the person
+  when it ends. Each session registers under a name of its own, `ondin` and eight hex digits
+  (`antigravity_server_name`), and grants and withdraws rules for that name only, so it never adds,
+  replaces or removes a registration or rule named `ondin` the person made. Its claim marker, named
+  after it and created exclusively, records the owning Ondin and the `agy` path it registered with,
+  and is removed only once the withdrawal held. While a session holds them, an `agy` the person
   runs finds Ondin's server registered and its tools pre-approved; no option scopes either to one
   process.
 - **Each harness is driven through its own headless mode, not the Agent Client Protocol.** ACP
@@ -77,8 +84,12 @@ name (`claude`) and a speaker name (*Claude*) shown on its replies. An unknown s
   then each harness's known install folders (CLIs are often installed off the inherited `PATH`),
   then `PATH` with `PATHEXT`.
 - **On Windows** npm's `.cmd` shims come last, since Rust refuses a multi-line argument to a batch
-  file. Behind a shim, the real program is started directly, so *Stop* kills the agent and not only
-  its `cmd.exe`. Every child is started with `CREATE_NO_WINDOW`.
+  file. Behind a shim, the real program is started directly. Every child is started with
+  `CREATE_NO_WINDOW` and `NoDefaultCurrentDirectoryInExePath=1`, in a Job Object of its own nested
+  in the session's, so *Stop* and a grace kill end the harness's whole process tree.
+- **A helper** (the `--help` probe, `agy mcp …`, `cursor-agent mcp enable`) runs in a private empty
+  folder and is ended, with its tree, past a deadline: 15 seconds for the probe, 30 for `agy`
+  (`process::run_bounded`).
 - **Ondin never installs a harness.** A missing one is said in the panel with the program it
   looked for.
 - **A probe reads `--help` once per program path** and caches what it finds: which sealing flags
@@ -104,8 +115,10 @@ name (`claude`) and a speaker name (*Claude*) shown on its replies. An unknown s
   duration and token counts, the harness exiting first, a refusal, and *Stopped*. Thinking is not
   shown.
 - **The parser is stateful per harness:** it turns restated text into deltas, drops restated tool
-  calls, and resets at the end of each turn. A line that is not JSON is kept as a diagnostic.
-- **Stop** sends Claude Code its interrupt and kills every other harness's child. An interrupt that
+  calls, and resets at the end of each turn. A line that is not JSON is kept as a diagnostic, and
+  so is Codex's `error` while it reconnects: only `turn.failed` ends its turn as failed.
+- **Stop** sends Claude Code its interrupt and kills every other harness's child with its whole
+  tree (its own process group off Windows). An interrupt that
   has not ended the turn in ten seconds kills the process, and the next turn respawns it with
   `--resume <session id>`. The turn ends only when the harness reports `Event::Stopped`; until then
   the send button reads *Stopping…*, disabled, and then a note says *Stopped. The next question
@@ -123,10 +136,15 @@ name (`claude`) and a speaker name (*Claude*) shown on its replies. An unknown s
   The key is the session's, so a harness that starts a process per turn finds its document and
   revisions on its next connection, with `changed` reporting what the person did in between
   (`mcp.md`, *Revisions*).
-- **The environment** marks the child (`ONDIN_AGENT_CHILD=1`; the `ondin` command line refuses
-  everything but `mcp-proxy` and `serve` under it, a speed bump rather than a boundary) and clears
-  the variables that would point a harness at another configuration or reopen its seal.
-- **A command line too long** for the platform is refused before spawning, naming the limit.
+- **The environment** marks the child (`ONDIN_AGENT_CHILD=1`) and clears the variables that would
+  point a harness at another configuration or reopen its seal (`OPENCODE_PERMISSION` among them).
+  Under the mark the `ondin` command line refuses everything but `mcp-proxy`, `serve` included, and
+  the proxy connects only to the window, never starting `serve`: the window holds the chat's grant
+  and `serve` none, so an agent there would act unchecked. A speed bump rather than a boundary.
+- **The window must have its endpoint.** A chat refuses to start when the window could not open
+  its MCP endpoint, since the chat's level lives in the window's grants.
+- **A command line too long** for the platform is refused before spawning, naming the limit and
+  what made it long (the system prompt riding OpenCode's first message, say).
 
 ## 4. What the agent can see and do
 
@@ -151,7 +169,8 @@ access level lists and everything else is denied.
 **Access** (`mcp::access::Level`) decides what the agent may do. Settings holds the default for a
 new chat, and the panel's head switches it for the chat in front. A switch ends the session, and a
 running turn with a note (*Stopped: the access level changed.*); the next question starts a new
-session with the prose replayed. Tools above the level are **left out of the tool list**, not
+session with the prose replayed. A chat on the default follows it: saving another default in
+Settings ends its session, since its grant was given at the old level. Tools above the level are **left out of the tool list**, not
 listed and refused: an agent that sees a tool plans around it.
 
 - **Look** — Phase 1's reads and exports (`mcp.md` §8.4). `export_png` is the agent's eyes.
@@ -177,7 +196,10 @@ directly. So the window, which starts the harness, grants each session's level t
   joins however it is launched; elsewhere the parent chain is walked, which a process that left its
   tree (`setsid`, a double fork) escapes.
 - The window grants the key before spawning and again with the session's process owner once it
-  starts, and revokes the key when the session ends.
+  starts. Ending the session revokes the grant at once, on the UI thread, and finishes the rest
+  (withdrawing Antigravity's registration, a bounded wait) off it. A revoked grant is kept as
+  *ended*, not removed, so a call still arriving from the chat is refused (*This chat has ended:
+  nothing was changed.*) rather than served as an ungranted client's; the last 32 are kept.
 - A granted call is written to the agent log (§7).
 
 Left alone: `describe_tools` still describes tools above a chat's level, and a client no grant
@@ -200,7 +222,10 @@ against an eager model, not a boundary against a hostile one. The seal's sentenc
 - **The card** heads with the sparkle, the title and the count of changes, lists the changes, and
   ends in one of:
   - **Apply** — runs the calls again on the document as it is, as one undo step named by the title
-    and marked as the assistant's (`Origin::Mcp`): the person applies it, the agent wrote it.
+    and marked as the assistant's (`Origin::Mcp`): the person applies it, the agent wrote it. It
+    is refused, with nothing changed, when the calls now reach a layer the card did not list,
+    other than ones they create (a `replace_text` with no `nodes` meeting a layer added since):
+    *The proposal now also changes `<name>`, which it did not list.*
   - **`<layer> changed after this was proposed`**, in the warning colour, with *Ask again*, which
     asks *`<name>` changed. Propose again.* with the proposal's written layers that still exist
     attached.
@@ -216,14 +241,19 @@ against an eager model, not a boundary against a hostile one. The seal's sentenc
   preamble, recap or offer of more. A choice is at most three options in an ` ```options ` block,
   one short line each, and a question. A layer is named by its id, so it renders as a link. A table
   or code only when asked for one or when the answer is code.
-- **The prompt goes in the harness's system-prompt flag** where it has one (Claude Code's
-  `--append-system-prompt`), so it holds on every turn and survives the harness compacting its
-  context; otherwise at the top of the conversation's first turn.
+- **The prompt goes in the harness's system-prompt flag** where it has one, so it holds on every
+  turn and survives the harness compacting its context; otherwise at the top of the conversation's
+  first turn. Claude Code takes it as a file (`--append-system-prompt-file`, falling back to
+  `--append-system-prompt` where its probe lacks the flag), keeping it and the replayed
+  conversation off the length-limited, world-readable command line. OpenCode has no file form and
+  takes its prompt as the last argument, so a long one is refused as too long.
 - **Each turn opens with a preamble**, fenced as data: the revision; the layers added, changed and
   removed since the last turn, by id and name (forty at most, then how many more); the page; the
   selection; the attached layers; the person's last three questions, since a harness's own memory
   of earlier turns is unreliable; and `style: brief`, since an instruction given once fades over a
-  long thread. The page outline, names and ids only, goes only on a session's first turn.
+  long thread. The page outline, names and ids only, goes only on a session's first turn. A name
+  in the preamble is written on one line with `<` and `>` as `‹` and `›`, so no layer or page name can
+  close the `<ondin-turn>` block and write words the model would read as the person's.
 - **The design is never sent whole.** The agent's earlier reads stay in its session, and the
   preamble says which went stale. Tool results' `changed` cannot do this alone: an agent answering
   from memory calls no tool.
@@ -275,7 +305,9 @@ of it is a secret.
   and is kept until the person picks.
 - **Path** — the program's path, empty for found automatically. Settings looks it up for the agent
   and path on screen, saved or not, with its own lookup beside the panel's: a spinner after the
-  label while it looks, then *Found …* in the accent ink or *Not found* in the error's.
+  label while it looks, then *Found …* in the accent ink or *Not found* in the error's. A typed
+  path is probed only once it has stood unchanged for 700 ms (`TYPING_QUIET`), since the probe
+  runs whatever the half-typed name names.
 - **Model** — free text in a `ui::suggest_field` (*Its default* as the hint, *Suggested models*
   on the chevron): the harness's suggestions in its list and as a ghost `Tab` fills.
 - **Effort** — the harness's own levels; hidden where it has none.
@@ -326,9 +358,12 @@ layers being asked about, and is one more kind of surface.
   until the first text or tool call, and again once a tool has finished and no text has followed.
   The seconds count from the send. A harness that exits before answering leaves a note, *Claude
   Code stopped before answering (exit code 1).*, with *Ask again* and *Show details* (the
-  diagnostics).
+  diagnostics); a turn the harness ends as failed leaves *Claude Code ended the turn with an
+  error.* the same way, whether or not it wrote a reason.
 - **Replies render markdown**: paragraphs, lists, tables, code blocks with a language bar and
-  *Copy*. A proposal renders as its card (§4).
+  *Copy*. A loose list, its items parted by blank lines, is one list, and an ordered one is
+  numbered from its first number. A reply's text is parsed once, not every frame (an egui
+  `FrameCache` keyed by the text). A proposal renders as its card (§4).
 - **An ` ```options ` block renders as a stack of `ui::field_button`s**; a click sends its line as
   the next question, with the same chips. Only the last turn's options are live.
 - **A tool call is a row**, 22 tall: its name in mono, its argument, a status dot and its result
@@ -348,15 +383,19 @@ layers being asked about, and is one more kind of surface.
   turn, never message text, so they are never sent back to the model.
 - **One conversation per document**, kept per machine in `<machine data>/chats/<document id>.json`
   (by a hash of the path when the id is not a plain name), never in the `.ondin` file: a chat is the
-  person's, not the work's. At most 100 messages; tool results are saved as *(result not saved)*,
-  and a turn still streaming is not saved.
+  person's, not the work's. It is written through `atomic::write`; when the document's id or path
+  changes, the old file is removed only once the new one is written. At most 100 messages, cut
+  from the front to start at a question, with each *Ask again* re-pointed at its question's new
+  place (one whose question was cut keeps its words and loses the button); tool results are saved
+  as *(result not saved)*, and a turn still streaming is not saved.
 
 ## 7. Logging and privacy
 
 - **Off sends nothing and starts no agent**, the probe included. A launch still sweeps what a
-  closed Ondin's sessions left, which can run `agy mcp` to withdraw a dead session's
-  registration from the person's Antigravity config: a standing grant there is worse than one
-  command.
+  closed Ondin's sessions left, which can run `agy mcp` to withdraw a dead session's own
+  registration (its `ondin` and eight hex digits) from the person's Antigravity config, with the
+  `agy` its marker recorded, else the one found now: a standing grant there is worse than one
+  command. A marker whose withdrawal did not hold stays for the next launch.
 - **What leaves the machine** is what the harness sends: the question, the attached layers'
   references, and whatever the agent reads through the tools. No document file is handed over, and
   no telemetry is sent by Ondin.
@@ -371,6 +410,10 @@ layers being asked about, and is one more kind of surface.
   harness's proxy connecting before `Session::start` returns; the grant with the session's process
   owner covers a process that sends another key or none
   (`an_owned_process_gets_the_chats_level_whatever_its_key`).
+- **An agent is kept off `serve` twice.** The proxy under `ONDIN_AGENT_CHILD` connects only to the
+  window (`proxy::Machine::connect`), and `main` refuses `ondin serve` under the mark, for an
+  agent with a shell. Each looks redundant beside the other; `serve` holds no grant, so either
+  gone lets an agent act unchecked. No test pins either.
 - **Copilot's `--available-tools` with an empty value fails open** (every tool, the shell
   included), so an empty grant names a tool nothing provides
   (`copilot_never_sends_an_empty_allowlist`).

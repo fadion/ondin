@@ -117,9 +117,12 @@ preview* (`ViewSwitch::SizePreview`, *Show size preview* in the palette and the 
 - **Subject:** the selection, outermost only (`build::in_document_order`, reversed so the top
   layer comes first), one row per layer with a box, five rows at most, past which a footer counts the rest (*Showing 5 of 8 layers*). A layer with no box gets no row and is not counted.
   The head's pin (`PUSH_PIN`) holds the current layers instead of following the selection. A
-  pinned layer that is gone passes the pin to a selected layer now in its place (same parent, same
-  index), which is what *Outline shape*, *Flatten* and *Convert to path* leave behind; else it
-  drops out, and the pin lets go when none is left. The pin is view state and never saved.
+  pinned layer that is gone passes the pin to the one layer selected in its place (same parent,
+  same index) that was not already a sibling there, which is what *Outline shape*, *Flatten* and
+  *Convert to path* leave behind; a sibling that slid up, or one of several selected (*Ungroup*'s
+  children), is no heir. Else it drops out, and the pin lets go when none is left. Places are kept
+  only while the card shows, so nothing is inherited across a time it was hidden. The pin is view
+  state and never saved.
 - **Tiles.** For each size N, the layer's box (`preview_world_bounds`, so a drag is followed) is
   squared on its longer side (`ondin_export::icon::square_of`, the icon export's framing) and drawn
   at N, centred in its column. A column is N + 28 wide, a ground strip the tallest size + 20, with
@@ -145,7 +148,9 @@ preview* (`ViewSwitch::SizePreview`, *Show size preview* in the palette and the 
   stays clear to close it: tick rows for 12, 16, 18, 20, 24, 28, 32, 40, 48 and 64, 80pt wide at
   least; a seventh is refused (*Six sizes at most*) and the last cannot go (*One size at least*).
   Sizes, ground and pixels are `prefs.size_preview` (`SizePreviewPrefs`: 16, 20, 24, 32, 48, both
-  grounds, pixels off).
+  grounds, pixels off); a hand-edited size outside `SIZE_CHOICES` is dropped on read, since one past
+  a texture's limit would fail the preview at every launch. `Escape` closes the ⋯ menu and only
+  that: the selection stays.
 - **Rendering** is on a worker (`job::Job`), one render at a time, the newest landed shown, through
   `VelloCpuRenderer::render_subtrees_with` with the session's overrides minus the outline ink and
   chrome ghost, so a drag or scrub shows. The `ImageStore` is handed to the worker and back, so a

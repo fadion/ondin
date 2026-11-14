@@ -1359,6 +1359,62 @@ fn scale_subtree(
     }
 }
 
+/// The angle in radians, clockwise on the page, that the Rotation field shows
+/// for a layer of `kind` drawn through `world`: a line's or an arc's from its
+/// start to its end, whose direction lives in the endpoint rather than the
+/// basis; else the basis's own orientation.
+pub fn shown_angle(kind: &NodeKind, world: Affine) -> f64 {
+    if let NodeKind::Line { end } | NodeKind::Arc { end, .. } = kind {
+        let (a, b) = (world * Point::ZERO, world * *end);
+        if (b - a).hypot() > 1e-9 {
+            return (b.y - a.y).atan2(b.x - a.x);
+        }
+    }
+    Basis::of(world).orientation.angle
+}
+
+/// The left and top of `id`'s box in its parent's space: the box it is drawn
+/// with (a group's is its children's) through its own used transform; a layer
+/// with no box by its origin. Where a placement by `x`, `y` puts it, and what
+/// a reparent answers.
+pub fn box_corner(doc: &Document, res: &Resolved, id: NodeId) -> Option<Point> {
+    let n = doc.get(id)?;
+    let local = res.used_local(doc, id).unwrap_or(n.transform());
+    Some(
+        crate::query::local_box(doc, res, id)
+            .map(|b| crate::geometry::transform_rect(local, b).origin())
+            .unwrap_or(local * Point::ZERO),
+    )
+}
+
+/// `id`'s stored transform moved so [`box_corner`] lands at `x`, `y`, keeping
+/// its rotation and scale; a side not given stays where it is.
+pub fn placed_at(
+    doc: &Document,
+    res: &Resolved,
+    id: NodeId,
+    x: Option<f64>,
+    y: Option<f64>,
+) -> Option<Affine> {
+    let corner = box_corner(doc, res, id)?;
+    let (x, y) = (x.unwrap_or(corner.x), y.unwrap_or(corner.y));
+    Some(Affine::translate((x - corner.x, y - corner.y)) * doc.get(id)?.transform())
+}
+
+/// The edit that turns `id` to `angle` radians clockwise on the page, as
+/// [`shown_angle`] measures it, about its box's centre, keeping its scale,
+/// skew and mirror; `None` when it stands so already.
+pub fn turned_to(doc: &Document, res: &Resolved, id: NodeId, angle: f64) -> Option<Transaction> {
+    let world = res.world_transform(id)?;
+    let by = angle - shown_angle(doc.get(id)?.kind(), world);
+    if by.abs() < 1e-9 {
+        return None;
+    }
+    let centre = crate::query::local_box(doc, res, id).map_or(Point::ZERO, |b| b.center());
+    let tx = rotate_node(doc, res, id, world * centre, by);
+    (!tx.0.is_empty()).then_some(tx)
+}
+
 /// Rotate a single node by `angle` radians about `pivot` (world space).
 ///
 /// The result goes through [`split_geometry_scale`]: under a skewed parent

@@ -4296,6 +4296,19 @@ pub enum PaintTarget {
     Stroke,
 }
 
+/// The texts among [`paint_targets`] of `ids` whose style sets a colour: a
+/// text draws in that colour over its fills, so new fills there clear it.
+pub fn coloured_texts(doc: &Document, ids: &[NodeId]) -> Vec<NodeId> {
+    paint_targets(doc, ids)
+        .into_iter()
+        .filter(|id| {
+            doc.get(*id).is_some_and(
+                |n| matches!(n.kind(), NodeKind::Text { style, .. } if style.color.is_some()),
+            )
+        })
+        .collect()
+}
+
 /// The nodes a bulk paint edit over `ids` actually writes to.
 ///
 /// A group is organisation, so an edit passes through it; a frame has paint of its

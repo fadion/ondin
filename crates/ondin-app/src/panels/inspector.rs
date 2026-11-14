@@ -4287,7 +4287,11 @@ impl OndinApp {
             }
             _ => None,
         };
-        let shown_line = line_ends.map(|(a, b)| (b.y - a.y).atan2(b.x - a.x));
+        // A line's angle as the agents' `set rotation` measures it too.
+        let shown_line = line_ends.and_then(|_| {
+            let kind = self.session.display_node(id)?.kind();
+            Some(ondin_core::edit::shown_angle(kind, Affine::new(world)))
+        });
         let laid_out = ondin_core::build::is_flex_item(&self.session.doc, id);
         // A bound axis's literal is 0, which a ratio would read as a size; binding
         // takes a ratio off (`build::keep_ratios`), so none is offered over one.

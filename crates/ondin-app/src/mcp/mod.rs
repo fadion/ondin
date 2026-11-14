@@ -1407,7 +1407,7 @@ fn write(
     // rotated or scaled parent answers the place `at` takes back.
     if verb.name == "reparent"
         && let Ok(Some(id)) = node(&args, "node")
-        && let Some(corner) = box_corner(s, id)
+        && let Some(corner) = ondin_core::edit::box_corner(&s.doc, &s.resolved, id)
     {
         let r = |v: f64| (v * 10.0).round() / 10.0;
         answer = json!({ "at": [r(corner.x), r(corner.y)] });
@@ -1712,13 +1712,8 @@ fn set(
         .is_some_and(|st| st.get("color").is_some());
     // Over every text the fills reach, through groups, as `set_fills` writes.
     if canon.contains_key("fills") && !given_colour {
-        let coloured: Vec<Value> = ondin_core::build::paint_targets(&s.doc, &ids)
+        let coloured: Vec<Value> = ondin_core::build::coloured_texts(&s.doc, &ids)
             .iter()
-            .filter(|id| {
-                s.doc.get(**id).is_some_and(|n| {
-                    matches!(n.kind(), ondin_core::NodeKind::Text { style, .. } if style.color.is_some())
-                })
-            })
             .map(|id| json!(id.to_wire()))
             .collect();
         if !coloured.is_empty() {
@@ -1755,7 +1750,9 @@ fn set(
         }
         if let Some(degrees) = rotation {
             for id in &ids {
-                let Some(tx) = turned_to(s, *id, degrees) else {
+                let turned =
+                    ondin_core::edit::turned_to(&s.doc, &s.resolved, *id, degrees.to_radians());
+                let Some(tx) = turned else {
                     continue;
                 };
                 refuse_kit_vault(s, &json!({ "node": id.to_wire() }))?;
@@ -1804,38 +1801,17 @@ fn set(
 }
 
 /// The `set_transform` step that puts the left and top of `id`'s box at `x`, `y`
-/// in its parent's space, for every kind: the box it is drawn with (a group's is
-/// its children's), moved by the difference so it keeps its rotation and scale.
-/// A side not given stays where it is. A layer with no box is placed by its
-/// origin.
+/// in its parent's space ([`ondin_core::edit::placed_at`]).
 fn placed_at(
     s: &EditorSession,
     id: NodeId,
     x: Option<f64>,
     y: Option<f64>,
 ) -> Result<Value, String> {
-    let n = s
-        .doc
-        .get(id)
+    let moved = ondin_core::edit::placed_at(&s.doc, &s.resolved, id, x, y)
         .ok_or_else(|| format!("no layer `{}`", id.to_wire()))?;
-    let corner = box_corner(s, id).unwrap_or_default();
-    let (x, y) = (x.unwrap_or(corner.x), y.unwrap_or(corner.y));
-    let moved = ondin_core::kurbo::Affine::translate((x - corner.x, y - corner.y)) * n.transform();
     Ok(json!({ "tool": "set_transform",
         "args": { "node": id.to_wire(), "transform": moved.as_coeffs() } }))
-}
-
-/// The left and top of `id`'s box in its parent's space, where `set`'s `at`
-/// puts it: the box it is drawn with (a group's is its children's) through its
-/// own transform; a layer with no box by its origin.
-fn box_corner(s: &EditorSession, id: NodeId) -> Option<ondin_core::kurbo::Point> {
-    let n = s.doc.get(id)?;
-    let local = s.resolved.used_local(&s.doc, id).unwrap_or(n.transform());
-    Some(
-        ondin_core::query::local_box(&s.doc, &s.resolved, id)
-            .map(|b| ondin_core::geometry::transform_rect(local, b).origin())
-            .unwrap_or(local * ondin_core::kurbo::Point::ZERO),
-    )
 }
 
 /// The `set_size` step that makes `id` `w` wide and `h` high, a side not given
@@ -1854,21 +1830,6 @@ fn sized(s: &EditorSession, id: NodeId, w: Option<f64>, h: Option<f64>) -> Resul
     };
     Ok(json!({ "tool": "set_size", "args": { "node": id.to_wire(),
         "width": w.unwrap_or(now.width), "height": h.unwrap_or(now.height) } }))
-}
-
-/// The edit that turns `id` to `degrees` clockwise on the page about its box's
-/// centre, keeping its scale, skew and mirror, as the Rotation field turns it;
-/// `None` when it stands so already.
-fn turned_to(s: &EditorSession, id: NodeId, degrees: f64) -> Option<ondin_core::Transaction> {
-    let world = s.resolved.world_transform(id)?;
-    let by = degrees.to_radians() - ondin_core::build::Basis::of(world).orientation.angle;
-    if by.abs() < 1e-9 {
-        return None;
-    }
-    let centre = ondin_core::query::local_box(&s.doc, &s.resolved, id)
-        .map_or(ondin_core::kurbo::Point::ZERO, |b| b.center());
-    let tx = ondin_core::edit::rotate_node(&s.doc, &s.resolved, id, world * centre, by);
-    (!tx.0.is_empty()).then_some(tx)
 }
 
 /// `set`'s pair `key` (`size` or `at`) as two sides, each `None` when not
@@ -2530,6 +2491,34 @@ mod tests {
         let after = docs.session.doc.get(id).unwrap().transform();
         let moved = (after.translation() - before.translation()).hypot();
         assert!(moved < 0.06, "moves nothing: {moved}");
+    }
+
+    /// `set`'s `rotation` on a line is the angle the Rotation field shows, its
+    /// start-to-end: a line drawn at 45° set to 0 lies flat.
+    /// flip: `turned_to` measuring the transform's basis → fails at "flat".
+    #[test]
+    fn set_rotation_turns_a_line_to_the_angle_shown() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let page = docs.session.doc.first_page().to_wire();
+        let tree = json!({ "kind": { "Line": { "end": { "x": 100.0, "y": 100.0 } } } });
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "insert_subtree",
+            json!({ "parent": page, "tree": tree }),
+        );
+        let line = ok(&out)["created"][0].clone();
+        let set = json!({ "nodes": [line], "props": { "rotation": 0 } });
+        ok(&call(&mut engine, &mut docs, 1, "set", set));
+        let id = NodeId::from_wire(line.as_str().unwrap()).unwrap();
+        let world = docs.session.resolved.world_transform(id).unwrap();
+        let ondin_core::NodeKind::Line { end } = docs.session.doc.get(id).unwrap().kind() else {
+            panic!("not a line");
+        };
+        let (a, b) = (world * ondin_core::kurbo::Point::ZERO, world * *end);
+        assert!((b.y - a.y).abs() < 1e-6 && b.x > a.x, "flat: {a:?} → {b:?}");
     }
 
     /// `set`'s `at` on a layer its container lays out is refused, naming the

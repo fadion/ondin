@@ -9468,6 +9468,7 @@ impl OndinApp {
             || self.export_row_open.is_some()
             || self.contrast.as_ref().is_some_and(|c| c.owns_escape())
             || self.vision_owns_escape()
+            || self.size_preview_owns_escape()
     }
 
     /// The inspector: a column of individually floating panels over the right of the

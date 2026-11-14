@@ -6821,6 +6821,28 @@ pub fn paint_colour_chip(p: &egui::Painter, rect: egui::Rect, c: egui::Color32) 
     );
 }
 
+/// [`paint_colour_chip`] split down the middle, `left` and `right` opaque: a
+/// choice that stands for two colours at once, as the size preview's *Both*
+/// grounds does.
+pub fn paint_colour_chip_halved(
+    p: &egui::Painter,
+    rect: egui::Rect,
+    left: egui::Color32,
+    right: egui::Color32,
+) {
+    let r = (rect.width().min(rect.height()) * 0.25).round() as u8;
+    let (l, rr) = rect.split_left_right_at_fraction(0.5);
+    let side = |nw: u8, ne: u8, sw: u8, se: u8| egui::CornerRadius { nw, ne, sw, se };
+    p.rect_filled(l, side(r, 0, r, 0), left);
+    p.rect_filled(rr, side(0, r, 0, r), right);
+    p.rect_stroke(
+        rect,
+        r,
+        egui::Stroke::new(1.0, swatch_hairline()),
+        egui::StrokeKind::Inside,
+    );
+}
+
 /// Paint a left-to-right ramp of `stops` across `rect` as a vertex-coloured
 /// mesh. Square corners — see [`mask_corners`]. Offsets are made monotonic here: an
 /// imported `<linearGradient>` with descending offsets arrives verbatim, and the

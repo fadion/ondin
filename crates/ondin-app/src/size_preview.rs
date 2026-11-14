@@ -78,13 +78,20 @@ struct Shown {
 pub(crate) struct SizePreview {
     /// The layers the pin holds; `None` follows the selection.
     pinned: Option<Vec<NodeId>>,
-    /// Where each pinned layer sat when last seen, its parent and index: a verb
-    /// that swaps a layer for a new one (*Outline shape*, *Flatten*, *Convert to
-    /// path*) selects what it made in that place, and the pin moves to it.
-    slots: Vec<(NodeId, (NodeId, usize))>,
+    /// Where each pinned layer sat when last seen, its parent and index, and the
+    /// siblings it had there: a verb that swaps a layer for a new one (*Outline
+    /// shape*, *Flatten*, *Convert to path*) selects what it made in that place,
+    /// alone, and the pin moves to it. A sibling that slid into the place, or one
+    /// of several layers selected (*Ungroup*'s children), is no heir. Kept only
+    /// while the card shows.
+    slots: Vec<(NodeId, (NodeId, usize), Vec<NodeId>)>,
     /// Whether the ⋯ menu is open.
     menu: bool,
     job: Option<Job<Landed>>,
+    /// The document and its resolution as the worker last took them, by
+    /// revision: a live edit renders after every input, and a deep copy per
+    /// render cost the UI thread milliseconds on a large page.
+    taken: Option<(u64, std::sync::Arc<(Document, Resolved)>)>,
     /// The image store between renders.
     store: Option<ImageStore>,
     shown: Option<Shown>,
@@ -169,6 +176,9 @@ fn render(
     let shown = (!hidden.is_empty()).then(|| {
         let mut copy = doc.clone();
         let _ = copy.apply(&Transaction(hidden));
+        // This thread's text engine holds Inter alone until it is given the
+        // document's faces.
+        ondin_core::text::register_font_data(&res.text_fonts());
         let res = Resolved::rebuild(&copy);
         (copy, res)
     });
@@ -227,13 +237,17 @@ impl OndinApp {
                 if doc.get(*id).is_some() {
                     continue;
                 }
-                let heir = sp
-                    .slots
-                    .iter()
-                    .find(|(was, _)| was == id)
-                    .and_then(|(_, slot)| {
-                        selected.iter().find(|s| slot_of(doc, **s) == Some(*slot))
-                    });
+                let heir = match selected {
+                    [one] => sp
+                        .slots
+                        .iter()
+                        .find(|(was, _, _)| was == id)
+                        .filter(|(_, slot, siblings)| {
+                            slot_of(doc, *one) == Some(*slot) && !siblings.contains(one)
+                        })
+                        .map(|_| one),
+                    _ => None,
+                };
                 if let Some(heir) = heir {
                     *id = *heir;
                 }
@@ -252,7 +266,11 @@ impl OndinApp {
             .pinned
             .iter()
             .flatten()
-            .filter_map(|id| Some((*id, slot_of(doc, *id)?)))
+            .filter_map(|id| {
+                let slot = slot_of(doc, *id)?;
+                let siblings = doc.get(slot.0)?.children().to_vec();
+                Some((*id, slot, siblings))
+            })
             .collect();
         let ids = match &self.size_preview.pinned {
             Some(p) => p.clone(),
@@ -310,6 +328,7 @@ impl OndinApp {
         }
         let Some(want) = want else {
             sp.waiting = None;
+            sp.taken = None;
             return;
         };
         let current = sp.shown.as_ref().is_some_and(|s| s.want == want);
@@ -324,8 +343,16 @@ impl OndinApp {
         if sp.job.is_some() {
             return;
         }
+        let rev = self.session.revision();
         let (doc, res, overrides) = self.session.render_inputs();
-        let (doc, res) = (doc.clone(), res.clone());
+        let taken = match &sp.taken {
+            Some((r, both)) if *r == rev => both.clone(),
+            _ => {
+                let both = std::sync::Arc::new((doc.clone(), res.clone()));
+                sp.taken = Some((rev, both.clone()));
+                both
+            }
+        };
         // The edit in flight, without what only explains a mode on the canvas.
         let mut overrides = overrides.clone();
         overrides.set_outline(None);
@@ -333,7 +360,8 @@ impl OndinApp {
         sp.stirred = false;
         let mut store = sp.store.take().unwrap_or_default();
         sp.job = Some(Job::spawn("ondin-size-preview", ctx, move || {
-            let tiles = render(&doc, &res, &overrides, &mut store, &want);
+            let (doc, res) = &*taken;
+            let tiles = render(doc, res, &overrides, &mut store, &want);
             Landed { want, tiles, store }
         }));
     }
@@ -345,6 +373,9 @@ impl OndinApp {
         if !self.show_size_preview || !canvas.is_positive() {
             self.size_preview.menu = false;
             self.size_preview.card = None;
+            // What changes while hidden is not seen happen, so no heir is read
+            // from it.
+            self.size_preview.slots.clear();
             return;
         }
         let prefs = self.prefs.size_preview.clone();
@@ -677,6 +708,15 @@ impl OndinApp {
         if away || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.size_preview.menu = false;
         }
+        // Heard, so the Escape that closes it spends no rung of the ladder.
+        if self.size_preview.menu {
+            self.popover_heard = true;
+        }
+    }
+
+    /// Whether the ⋯ menu is open and so claims an `Escape` press.
+    pub(crate) fn size_preview_owns_escape(&self) -> bool {
+        self.size_preview.menu
     }
 
     /// The loupe beside the card: the hovered pixel tile at [`LOUPE_ZOOM`], each
@@ -738,38 +778,11 @@ impl OndinApp {
 /// rather than a glyph, since the grounds are colours.
 fn paint_ground_cell(p: &egui::Painter, i: usize, r: egui::Rect) {
     let chip = egui::Rect::from_center_size(r.center(), egui::vec2(10.0, 10.0));
-    let radius = egui::CornerRadius::same(2);
-    let edge = egui::Stroke::new(1.0, ui::swatch_hairline());
     match i {
-        0 => {
-            p.rect_filled(chip, radius, color::light_ground());
-        }
-        1 => {
-            p.rect_filled(chip, radius, color::dark_ground());
-        }
-        _ => {
-            let (left, right) = chip.split_left_right_at_fraction(0.5);
-            p.rect_filled(
-                left,
-                egui::CornerRadius {
-                    nw: 2,
-                    sw: 2,
-                    ..Default::default()
-                },
-                color::light_ground(),
-            );
-            p.rect_filled(
-                right,
-                egui::CornerRadius {
-                    ne: 2,
-                    se: 2,
-                    ..Default::default()
-                },
-                color::dark_ground(),
-            );
-        }
+        0 => ui::paint_colour_chip(p, chip, color::light_ground()),
+        1 => ui::paint_colour_chip(p, chip, color::dark_ground()),
+        _ => ui::paint_colour_chip_halved(p, chip, color::light_ground(), color::dark_ground()),
     }
-    p.rect_stroke(chip, radius, edge, egui::StrokeKind::Outside);
 }
 
 #[cfg(test)]
@@ -949,6 +962,28 @@ mod tests {
         assert_eq!(toggled(&[12, 16, 20, 24, 32, 48], 64), None, "six at most");
     }
 
+    /// Escape closes the ⋯ menu and only that: the selection stays.
+    /// flip: `a_popover_owns_escape` without the size preview's menu → fails at
+    /// "the selection stays".
+    #[test]
+    fn escape_closes_the_sizes_menu_and_keeps_the_selection() {
+        let ctx = egui::Context::default();
+        let (mut app, frame) = app_with_preview(&ctx);
+        app.size_preview.menu = true;
+        pass(&ctx, &mut app, Vec::new());
+        assert!(app.size_preview.menu, "the fixture opened the menu");
+        let escape = egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        pass(&ctx, &mut app, vec![escape]);
+        assert!(!app.size_preview.menu, "the menu closed");
+        assert_eq!(app.session.selection.ids(), [frame], "the selection stays");
+    }
+
     /// *Outline shape* on a pinned rectangle swaps it for a new path in its place,
     /// selected; the pin moves to the path rather than letting go.
     /// flip: `size_preview_subjects` skipping the heir lookup → fails at "the pin
@@ -989,5 +1024,30 @@ mod tests {
         assert!(app.size_preview.pinned.is_some());
         app.session.selection.clear();
         assert_eq!(app.size_preview_subjects(), [path], "and holds it");
+
+        // A sibling that slides into a deleted pinned layer's place is no heir,
+        // though selected alone: the pin lets go.
+        // flip: the heir test without its `siblings` check → fails at "lets go".
+        let below = app.session.ids.mint();
+        assert!(app.session.commit(Transaction(vec![Operation::CreateNode {
+            id: below,
+            parent: frame,
+            index: 1,
+            kind: NodeKind::Rect {
+                size: Size::new(8.0, 8.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::IDENTITY),
+            name: None,
+        }])));
+        assert_eq!(app.size_preview_subjects(), [path]);
+        assert!(
+            app.session
+                .commit(Transaction(vec![Operation::DeleteNode { id: path }]))
+        );
+        app.session.selection.set_one(below);
+        app.size_preview_subjects();
+        assert!(app.size_preview.pinned.is_none(), "lets go");
     }
 }

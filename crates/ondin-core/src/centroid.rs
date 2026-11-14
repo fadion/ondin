@@ -3,9 +3,11 @@
 //! sits centred in its circle.
 //!
 //! Ink is weighed by area in world space: fills with their fill rule, strokes by
-//! the ink they lay ([`crate::build::stroke_ink`]), overlaps counted once and a
-//! masked run cut to its mask. Opacity does not weigh, and hidden layers and
-//! slices do not count.
+//! the ink they lay ([`crate::build::stroke_ink`]), overlaps counted once, a
+//! masked run cut to its mask and a clipping frame's content cut to the frame.
+//! Partial opacity does not scale the weight, but a paint that draws nothing does
+//! not weigh: a layer at opacity 0, or a fill or stroke wholly transparent, as a
+//! keyline box is. Hidden layers and slices do not count.
 
 use crate::build::{Flatten, polyline};
 use crate::{Document, NodeId, NodeKind, Resolved};
@@ -87,7 +89,9 @@ pub fn align(
 /// fill rule so that the caller can union them non-zero.
 fn collect(doc: &Document, res: &Resolved, id: NodeId, out: &mut Vec<Vec<[f64; 2]>>) {
     let Some(node) = doc.get(id) else { return };
-    if !doc.shown(id) {
+    if !doc.shown(id)
+        || doc.opacity_drawn_in(doc.variables(), id, node.opacity(), node.opacity_var()) <= 0.0
+    {
         return;
     }
     let Some(world) = res.world_transform(id) else {
@@ -105,9 +109,14 @@ fn collect(doc: &Document, res: &Resolved, id: NodeId, out: &mut Vec<Vec<[f64; 2
         }
         _ => {}
     }
-    if let Some(shape) = res.local_path(doc, id) {
+    let shape = res.local_path(doc, id);
+    if let Some(shape) = &shape {
         let paint = doc.resolved_paint(id, node.paint());
-        if node.paint().fills.iter().any(|f| f.visible) {
+        if paint
+            .fills
+            .iter()
+            .any(|f| f.visible && inks(f.brush.drawn()))
+        {
             let rule = match node.fill_rule() {
                 crate::node::FillRule::EvenOdd => FillRule::EvenOdd,
                 crate::node::FillRule::NonZero => FillRule::NonZero,
@@ -115,8 +124,8 @@ fn collect(doc: &Document, res: &Resolved, id: NodeId, out: &mut Vec<Vec<[f64; 2
             push_read(&rings(&(world * shape.clone())), rule, out);
         }
         for (s, d) in node.paint().strokes.iter().zip(&paint.strokes) {
-            if let Some(laid) =
-                crate::build::stroke_ink(kind, &shape, &d.value).filter(|_| s.visible)
+            if let Some(laid) = crate::build::stroke_ink(kind, shape, &d.value)
+                .filter(|_| s.visible && inks(d.value.brush.drawn()))
             {
                 push_read(&rings(&(world * laid)), FillRule::NonZero, out);
             }
@@ -126,6 +135,50 @@ fn collect(doc: &Document, res: &Resolved, id: NodeId, out: &mut Vec<Vec<[f64; 2
     if matches!(kind, NodeKind::Boolean { .. }) {
         return;
     }
+    // A clipping frame shows its content only inside its own outline.
+    let clip = match (&shape, node.clip() && kind.clips_children()) {
+        (Some(shape), true) => Some(rings(&(world * shape.clone()))),
+        _ => None,
+    };
+    let mut kids = Vec::new();
+    collect_children(doc, res, node, world, &mut kids);
+    match clip {
+        Some(c) => {
+            let cut = std::panic::catch_unwind(|| {
+                flat(kids.overlay(&c, OverlayRule::Intersect, FillRule::NonZero))
+            });
+            out.extend(cut.unwrap_or_default());
+        }
+        None => out.extend(kids),
+    }
+}
+
+/// Whether `brush` puts any ink down: a colour or gradient with some colour not
+/// wholly transparent, or a picture not drawn at alpha 0.
+fn inks(brush: &crate::Brush) -> bool {
+    use peniko::color::Srgb;
+    match brush {
+        crate::Brush::Solid(c) => c.components[3] > 0.0,
+        crate::Brush::Gradient(g) => {
+            g.opacity > 0.0
+                && g.gradient
+                    .stops
+                    .iter()
+                    .any(|s| s.color.to_alpha_color::<Srgb>().components[3] > 0.0)
+        }
+        crate::Brush::Image(i) => i.sampler.alpha > 0.0,
+    }
+}
+
+/// The polygons the children of `node`, whose transform into world space is
+/// `world`, paint: each masked run cut to its mask.
+fn collect_children(
+    doc: &Document,
+    res: &Resolved,
+    node: &crate::Node,
+    world: kurbo::Affine,
+    out: &mut Vec<Vec<[f64; 2]>>,
+) {
     let mut mask: Option<Vec<Vec<[f64; 2]>>> = None;
     for c in node.children() {
         if !crate::resolve::lends_bounds(doc, *c) {

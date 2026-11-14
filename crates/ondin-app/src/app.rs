@@ -172,6 +172,10 @@ pub(crate) struct InFlight {
     /// (the modal writes its own draft, not `RenderOverrides`). Also keeps the cancel
     /// gate armed after egui clears `ctx.dragged_id()` on any button's release.
     pub(crate) settings_scrub: Option<crate::settings::Scrubbed>,
+    /// The library Settings card's numbers as they were when a scrub began, for the
+    /// same reasons as [`Self::settings_scrub`]. The card answers the right-click
+    /// itself, since the editor's cancel does not run behind the library.
+    pub(crate) library_scrub: Option<crate::panels::dashboard::LibraryNumbers>,
     /// The batch rename box's numbering as it was when a From, Step or Pad scrub
     /// began, for the same reasons as [`Self::settings_scrub`].
     pub(crate) rename_scrub: Option<ondin_core::rename::Numbering>,
@@ -251,6 +255,13 @@ mod in_flight_tests {
                 "settings_scrub",
                 InFlight {
                     settings_scrub: Some(crate::settings::Scrubbed::default()),
+                    ..Default::default()
+                },
+            ),
+            (
+                "library_scrub",
+                InFlight {
+                    library_scrub: Some(Default::default()),
                     ..Default::default()
                 },
             ),
@@ -3033,6 +3044,7 @@ impl OndinApp {
         self.pen_touch = None;
         self.in_flight.session_scrub = None;
         self.in_flight.settings_scrub = None;
+        self.in_flight.library_scrub = None;
         self.in_flight.rename_scrub = None;
         self.in_flight.repeat_scrub = None;
         self.in_flight.blend_scrub = None;

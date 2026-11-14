@@ -87,7 +87,7 @@ const MIN_BODY_H: f32 = 200.0;
 const MAX_BODY_H: f32 = 520.0;
 /// The value column every labelled row's control fills (a dropdown, a colour row
 /// with its reset, a field), so their left and right edges line up down a tab.
-const PREF_CONTROL_W: f32 = 220.0;
+pub(crate) const PREF_CONTROL_W: f32 = 220.0;
 
 /// The Settings card's tabs, in the strip's order. Which one shows is the run's,
 /// not the form's: switching keeps every edit, and it is never saved.
@@ -207,6 +207,7 @@ impl Settings {
             snap_px: self.canvas.snap_px,
             paste_offset: self.canvas.paste_offset,
             default_text_size: self.default_text_size,
+            library: self.library.numbers(),
         }
     }
 
@@ -218,6 +219,7 @@ impl Settings {
         self.canvas.snap_px = s.snap_px;
         self.canvas.paste_offset = s.paste_offset;
         self.default_text_size = s.default_text_size;
+        self.library.restore(s.library);
     }
 
     /// The theme picked in the form, which the chrome previews while the modal
@@ -301,6 +303,7 @@ pub(crate) struct Scrubbed {
     snap_px: u8,
     paste_offset: u16,
     default_text_size: f64,
+    library: crate::panels::dashboard::LibraryNumbers,
 }
 
 /// The settings button's box and glyph on both screens — the editor's
@@ -590,8 +593,9 @@ impl OndinApp {
                 false
             }
             SettingsTab::Library => {
-                *retry |= self.library_rows(ui, &mut draft.library, PREF_CONTROL_W);
-                false
+                let rows = self.library_rows(ui, &mut draft.library);
+                *retry |= rows.retry;
+                rows.scrubbing
             }
             SettingsTab::Canvas => {
                 section(ui, "Wheel");
@@ -641,6 +645,7 @@ impl OndinApp {
                     "The size new text layers start at",
                     &mut draft.default_text_size,
                     (Prefs::TEXT_SIZE_MIN, Prefs::TEXT_SIZE_MAX),
+                    0.5,
                 );
                 ui.add_space(ROW_GAP);
                 if ui::switch_row(ui, "Check spelling", draft.spell_check, SWITCH_H)
@@ -694,6 +699,7 @@ impl OndinApp {
                 f64::from(CanvasPrefs::GUIDE_MIN),
                 f64::from(CanvasPrefs::GUIDE_MAX),
             ),
+            SLOW_SCRUB,
         );
         canvas.guide_thickness = thickness as u8;
         ui.add_space(ROW_GAP);
@@ -912,28 +918,25 @@ impl OndinApp {
         }
         ui.add_space(ROW_GAP * 2.0);
         let size = PhotoSize::from_key(&draft.photo_size);
-        labelled_row(ui, "Photo size", |ui| {
-            ui.spacing_mut().button_padding.y = 0.0;
-            let mut picked = size;
-            egui::ComboBox::from_id_salt("settings-photo-size")
-                .icon(ui::combo_chevron)
-                .width(PREF_CONTROL_W)
-                .selected_text(ui::combo_text(size.label()))
-                .show_ui(ui, |ui| {
-                    ui::menu_rows(ui);
-                    for s in PhotoSize::ALL {
-                        ui.selectable_value(&mut picked, s, s.label());
-                    }
-                })
-                .response
-                .on_hover_text(
-                    "The size a photo is downloaded and placed at. Openverse serves only \
-                     the original",
-                );
-            if picked != size {
-                draft.photo_size = picked.key().to_string();
-            }
-        });
+        let mut picked = size;
+        choice_row(
+            ui,
+            "Photo size",
+            "settings-photo-size",
+            PREF_CONTROL_W,
+            size.label(),
+            |ui| {
+                for s in PhotoSize::ALL {
+                    ui.selectable_value(&mut picked, s, s.label());
+                }
+            },
+        )
+        .on_hover_text(
+            "The size a photo is downloaded and placed at. Openverse serves only the original",
+        );
+        if picked != size {
+            draft.photo_size = picked.key().to_string();
+        }
         ui.add_space(ROW_GAP);
         self.asset_cache_row(ui);
     }
@@ -1138,16 +1141,19 @@ fn pref_colour_of(canvas: &mut CanvasPrefs, which: PrefColour) -> &mut ondin_cor
 }
 
 /// A labelled whole number in the value column, `unit` after it: the guide
-/// thickness, the snap distance, the paste offset. Rounded and held to `lo..=hi`
-/// here as well as by the scrub, which settles a drag and leaves typing alone.
-/// Returns whether it is being scrubbed.
-fn whole_row(
+/// thickness, the snap distance, the paste offset, the library's autosave, trash
+/// and undo history. Rounded and held to `lo..=hi` here as well as by the scrub,
+/// which settles a drag and leaves typing alone. `rate` is the scrub's units per
+/// point: [`SLOW_SCRUB`] for a short range set to the unit, [`ui::Scrub::whole`]'s
+/// usual 0.5 for a long one. Returns whether it is being scrubbed.
+pub(crate) fn whole_row(
     ui: &mut egui::Ui,
     label: &str,
     unit: &'static str,
     tooltip: &str,
     value: &mut f64,
     (lo, hi): (f64, f64),
+    rate: f64,
 ) -> bool {
     let dragging = labelled_row(ui, label, |ui| {
         let (resp, _) = ui::value_field_suffixed(
@@ -1160,8 +1166,7 @@ fn whole_row(
                 tooltip: "",
             }),
             value,
-            // As slow as the nudge fields: whole steps.
-            Scrub::whole(0.1).range(lo..=hi),
+            Scrub::whole(rate).range(lo..=hi),
             |d| d.custom_formatter(ui::number(0)),
         );
         resp.on_hover_text(tooltip).dragged()
@@ -1170,8 +1175,11 @@ fn whole_row(
     dragging
 }
 
-/// The *Snap distance* row, into `canvas`, with its caption. Returns whether it is
-/// being scrubbed.
+/// A [`whole_row`]'s scrub rate for a short range set to the unit, as the nudge
+/// fields are: 20pt of travel a step rather than the usual 2.
+pub(crate) const SLOW_SCRUB: f64 = 0.1;
+
+/// The *Snap distance* row, into `canvas`. Returns whether it is being scrubbed.
 fn snap_row(ui: &mut egui::Ui, canvas: &mut CanvasPrefs) -> bool {
     let mut px = f64::from(canvas.snap_px());
     let range = (
@@ -1185,6 +1193,7 @@ fn snap_row(ui: &mut egui::Ui, canvas: &mut CanvasPrefs) -> bool {
         "How near, on screen, an edge comes before it snaps, at any zoom",
         &mut px,
         range,
+        SLOW_SCRUB,
     );
     canvas.snap_px = px as u8;
     dragging
@@ -1204,6 +1213,7 @@ fn paste_row(ui: &mut egui::Ui, canvas: &mut CanvasPrefs) -> bool {
         ),
         &mut px,
         (0.0, f64::from(CanvasPrefs::PASTE_MAX)),
+        0.5,
     );
     canvas.paste_offset = px as u16;
     dragging
@@ -1830,7 +1840,11 @@ impl OndinApp {
 
 /// A row's label on the left and its controls on the right, laid as
 /// *Default font*'s row is: `controls` adds them right to left, first at the edge.
-fn labelled_row<R>(ui: &mut egui::Ui, label: &str, controls: impl FnOnce(&mut egui::Ui) -> R) -> R {
+pub(crate) fn labelled_row<R>(
+    ui: &mut egui::Ui,
+    label: &str,
+    controls: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
     labelled_row_busy(ui, label, false, controls)
 }
 
@@ -1926,6 +1940,40 @@ pub(crate) fn caption(ui: &mut egui::Ui, text: &str) {
 fn caption_in(ui: &mut egui::Ui, text: &str, ink: egui::Color32) {
     ui.add_space(3.0);
     ui.label(egui::RichText::new(text).size(CAPTION_PT).color(ink));
+}
+
+/// A [`caption`] in the warning amber: a setting that is valid and has a
+/// consequence worth naming (autosave off, the trash emptied on delete).
+pub(crate) fn warn_caption(ui: &mut egui::Ui, text: &str) {
+    caption_in(ui, text, theme::color::warn());
+}
+
+/// A labelled dropdown: the question on the left, a `width`-wide `ComboBox`
+/// against the right margin holding `options` (`ui.selectable_value` rows).
+/// Returns the closed combo's response, for a tooltip.
+pub(crate) fn choice_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    id: &str,
+    width: f32,
+    selected: &str,
+    options: impl FnOnce(&mut egui::Ui),
+) -> egui::Response {
+    labelled_row(ui, label, |ui| {
+        ui.scope(|ui| {
+            ui::combo_height(ui);
+            egui::ComboBox::from_id_salt(id)
+                .icon(ui::combo_chevron)
+                .width(width)
+                .selected_text(ui::combo_text(selected))
+                .show_ui(ui, |ui| {
+                    ui::menu_rows(ui);
+                    options(ui);
+                })
+                .response
+        })
+        .inner
+    })
 }
 
 /// One of the two nudge distances: a [`ui::value_field`] with the word inside it
@@ -2047,8 +2095,12 @@ mod tests {
                 .shapes
                 .iter()
                 .filter_map(|cs| match &cs.shape {
+                    // As wide as it shows: a singleline field scrolls its text, so the
+                    // galley overruns the field and its clip.
                     egui::Shape::Text(t) => {
-                        Some((t.pos, t.galley.size(), t.galley.text().to_owned()))
+                        let mut size = t.galley.size();
+                        size.x = size.x.min(cs.clip_rect.right() - t.pos.x);
+                        Some((t.pos, size, t.galley.text().to_owned()))
                     }
                     _ => None,
                 })
@@ -2497,6 +2549,29 @@ mod tests {
         assert!(
             app.in_flight.settings_scrub.is_none(),
             "and the snapshot is spent, so a second right-click winds nothing back"
+        );
+    }
+
+    /// The Library tab's numbers are in the snapshot too: a right-click puts a
+    /// scrubbed autosave, trash or undo history back.
+    /// flip: drop `self.library.restore` from `Settings::restore` → fails at the
+    /// numbers assertion.
+    #[test]
+    fn a_right_click_winds_a_library_tab_scrub_back() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        app.toggle_settings(&ctx, Some(SettingsTab::Library));
+        let before = before_form(&app);
+        app.in_flight.settings_scrub = Some(before.scrubbed());
+        let mut scrubbed = before.clone();
+        scrubbed.library.autosave_secs = 900;
+        scrubbed.library.trash_keep_days = 0;
+        assert_ne!(scrubbed.library.numbers(), before.library.numbers());
+        app.settings = Some(scrubbed);
+        assert!(app.cancel_gesture(&ctx));
+        assert_eq!(
+            app.settings.as_ref().expect("still open").library.numbers(),
+            before.library.numbers()
         );
     }
 

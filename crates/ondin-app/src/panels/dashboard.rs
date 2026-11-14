@@ -420,6 +420,40 @@ impl LibrarySettings {
             reopen_last: prefs.reopen_last,
         }
     }
+
+    /// The draft's scrubbable numbers, as a scrub's start snapshots them.
+    pub(crate) fn numbers(&self) -> LibraryNumbers {
+        LibraryNumbers {
+            autosave_secs: self.autosave_secs,
+            trash_keep_days: self.trash_keep_days,
+            history_size: self.history_size,
+        }
+    }
+
+    /// Put the scrubbable numbers back: a right-clicked scrub's cancel.
+    pub(crate) fn restore(&mut self, n: LibraryNumbers) {
+        self.autosave_secs = n.autosave_secs;
+        self.trash_keep_days = n.trash_keep_days;
+        self.history_size = n.history_size;
+    }
+}
+
+/// The library rows' scrubbable numbers as they were when a scrub began: what a
+/// right-click cancel puts back, on the dashboard's card (`InFlight::library_scrub`)
+/// and on the editor Settings' *Library* tab (`settings::Scrubbed`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct LibraryNumbers {
+    autosave_secs: u64,
+    trash_keep_days: u64,
+    history_size: u64,
+}
+
+/// What [`OndinApp::library_rows`] reports back to the card drawing it.
+pub(crate) struct LibraryRows {
+    /// *Try again* was pressed: the caller runs the retry after its card.
+    pub(crate) retry: bool,
+    /// A number is being scrubbed: the caller snapshots it for a right-click cancel.
+    pub(crate) scrubbing: bool,
 }
 
 /// The Delete project modal's own state.
@@ -3572,7 +3606,7 @@ impl OndinApp {
                 }
                 if dp.keep_files {
                     ui.add_space(8.0);
-                    picker_row(
+                    settings::choice_row(
                         ui,
                         "Otherwise move them to",
                         "transfer-to",
@@ -3746,9 +3780,20 @@ impl OndinApp {
         let saved = LibrarySettings::from_prefs(&self.prefs, &self.library.root);
         let mut decision: Option<settings::Decision> = None;
         let mut retry = false;
+        // The editor's right-click cancel does not run behind the library, so the card
+        // answers its own: a scrubbed number goes back to where the scrub began, and
+        // the drag ends so the held button scrubs no further.
+        if ctx.input(|i| i.pointer.button_pressed(egui::PointerButton::Secondary))
+            && let Some(n) = self.in_flight.library_scrub.take()
+        {
+            d.restore(n);
+            ctx.stop_dragging();
+        }
+        let before = d.numbers();
 
         let modal = settings::card("library-settings", ctx, |ui| {
-            ui.set_width(ui::menu_inner_w(settings::CARD_W, settings::PAD));
+            // The editor's Settings width, so the rows' value column is the same one.
+            ui.set_width(ui::menu_inner_w(settings::SETTINGS_W, settings::PAD));
             // Zero, so every vertical gap is written out (`settings::SECTION_AIR`).
             ui.spacing_mut().item_spacing.y = 0.0;
 
@@ -3757,12 +3802,20 @@ impl OndinApp {
             }
 
             settings::theme_section(ui, &mut d.theme);
-            retry = self.library_rows(ui, &mut d, PICKER_W);
+            let rows = self.library_rows(ui, &mut d);
+            retry = rows.retry;
+            if rows.scrubbing && self.in_flight.library_scrub.is_none() {
+                self.in_flight.library_scrub = Some(before);
+            }
 
             if let Some(x) = settings::modal_footer(ui, "Save changes", d != saved) {
                 decision = Some(x);
             }
         });
+        // A release ends the scrub; nothing runs `end_released_gestures` here.
+        if ctx.input(|i| !i.pointer.any_down()) {
+            self.in_flight.library_scrub = None;
+        }
 
         // The backdrop and Escape both cancel; read after the body, which they consume.
         if modal.should_close() {
@@ -3770,9 +3823,13 @@ impl OndinApp {
         }
 
         match decision {
-            Some(settings::Decision::Cancel) => self.library_settings = None,
+            Some(settings::Decision::Cancel) => {
+                self.library_settings = None;
+                self.in_flight.library_scrub = None;
+            }
             Some(settings::Decision::Save) => {
                 self.library_settings = Some(d);
+                self.in_flight.library_scrub = None;
                 self.apply_library_settings();
             }
             // Still open: keep whatever was typed into it this frame.
@@ -3787,47 +3844,43 @@ impl OndinApp {
 
     /// The library's rows, below the theme: storage, how the dashboard opens, and
     /// what launch reopens. Shared by the dashboard's card and the editor Settings'
-    /// *Library* tab; `picker_w` is the host card's dropdown column. Returns
-    /// whether *Try again* was pressed, which the caller answers after its card,
-    /// since a retry runs a whole migration and must not happen inside a paint.
-    pub(crate) fn library_rows(
-        &self,
-        ui: &mut egui::Ui,
-        d: &mut LibrarySettings,
-        picker_w: f32,
-    ) -> bool {
+    /// *Library* tab, both `settings::SETTINGS_W` wide, and built from the editor
+    /// Settings' rows ([`settings::labelled_row`], [`settings::whole_row`],
+    /// [`settings::choice_row`]) so every control sits in its value column.
+    pub(crate) fn library_rows(&self, ui: &mut egui::Ui, d: &mut LibrarySettings) -> LibraryRows {
         let resolved_now = self.library.root.display().to_string();
         let stranded = &self.stranded;
         let mut retry = false;
+        let mut scrubbing = false;
+        let col = settings::PREF_CONTROL_W;
         {
             settings::section(ui, "Storage");
-            field_label(ui, "Base folder");
-            // The button is allocated first, in a right-to-left row, so the field takes
-            // the rest (`picker_row`'s shape). Disabled while the typed path is no folder.
+            // The open button against the margin and the path beside it, inside the
+            // value column, as a colour row's reset and swatch are. Disabled while the
+            // typed path is no folder.
             let open_dir = PathBuf::from(d.base_folder.trim());
             let can_open = !d.base_folder.trim().is_empty() && open_dir.is_dir();
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = settings::COL_GAP;
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui::field_button(
-                        ui,
-                        icon::FOLDER_OPEN,
-                        settings::FIELD_H,
-                        FieldButton::enabled_if(can_open),
-                    )
-                    .on_hover_text("Open the library folder")
-                    .clicked()
-                        && can_open
-                    {
-                        crate::panels::show_in_file_browser(&open_dir);
-                    }
-                    ui::text_field(
-                        ui,
-                        egui::vec2(ui.available_width(), settings::FIELD_H),
-                        &mut d.base_folder,
-                        &resolved_now,
-                    );
-                });
+            settings::labelled_row(ui, "Base folder", |ui| {
+                if ui::field_button(
+                    ui,
+                    icon::FOLDER_OPEN,
+                    settings::FIELD_H,
+                    FieldButton::enabled_if(can_open),
+                )
+                .on_hover_text("Open the library folder")
+                .clicked()
+                    && can_open
+                {
+                    crate::panels::show_in_file_browser(&open_dir);
+                }
+                let w = col - settings::FIELD_H - settings::COL_GAP;
+                ui::text_field(
+                    ui,
+                    egui::vec2(w, settings::FIELD_H),
+                    &mut d.base_folder,
+                    &resolved_now,
+                )
+                .on_hover_text("Where the library keeps its documents");
             });
             // The migrate switch exists only once the path has changed; its caption
             // changes with it so *off* is stated.
@@ -3858,7 +3911,7 @@ impl OndinApp {
             // status line cannot hold. Below the switch, which is about the next move.
             if let Some(report) = stranded {
                 ui.add_space(settings::ROW_GAP);
-                warn_caption(
+                settings::warn_caption(
                     ui,
                     &match report.failed.len() {
                         1 => "1 file could not be moved and is still in:".to_string(),
@@ -3891,27 +3944,30 @@ impl OndinApp {
             }
 
             ui.add_space(settings::ROW_GAP);
-            // The label sits inside the field in a two-column row, as `settings::nudge_field`
-            // does; *Base folder* keeps a caption because a path has no width for a prefix.
-            let half = egui::vec2(
-                (ui.available_width() - settings::COL_GAP) / 2.0,
-                settings::FIELD_H,
+            scrubbing |= whole_count(
+                ui,
+                "Autosave",
+                "sec",
+                "How often an open document saves itself; 0 turns autosave off",
+                &mut d.autosave_secs,
+                3600,
             );
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = settings::COL_GAP;
-                whole_field(ui, half, "Autosave", "s", &mut d.autosave_secs, 3600);
-                whole_field(ui, half, "Trash", "d", &mut d.trash_keep_days, 365);
-            });
-            // Zero is a real setting in both fields and means something alarming, so
-            // it is said out loud.
-            match (d.autosave_secs, d.trash_keep_days) {
-                (0, 0) => warn_caption(
-                    ui,
-                    "Autosave is off, and deleted files are removed straight away.",
-                ),
-                (0, _) => warn_caption(ui, "Autosave is off."),
-                (_, 0) => warn_caption(ui, "Deleted files are removed straight away."),
-                _ => {}
+            // Zero is a real setting in all three fields and means something alarming,
+            // so it is said out loud, under its own field.
+            if d.autosave_secs == 0 {
+                settings::warn_caption(ui, "Autosave is off.");
+            }
+            ui.add_space(settings::ROW_GAP);
+            scrubbing |= whole_count(
+                ui,
+                "Trash",
+                "days",
+                "How long a deleted file stays in the trash; 0 deletes it straight away",
+                &mut d.trash_keep_days,
+                365,
+            );
+            if d.trash_keep_days == 0 {
+                settings::warn_caption(ui, "Deleted files are removed straight away.");
             }
 
             ui.add_space(settings::ROW_GAP);
@@ -3929,17 +3985,24 @@ impl OndinApp {
                 d.version_history = !d.version_history;
             }
             ui.add_space(settings::ROW_GAP);
-            whole_field(ui, half, "Undo history", "steps", &mut d.history_size, 1000);
+            scrubbing |= whole_count(
+                ui,
+                "Undo history",
+                "steps",
+                "How many undo steps a closed document keeps",
+                &mut d.history_size,
+                1000,
+            );
             if d.history_size == 0 {
-                warn_caption(ui, "Undo history is cleared when a document is closed.");
+                settings::warn_caption(ui, "Undo history is cleared when a document is closed.");
             }
 
             settings::section(ui, "Library");
-            picker_row(
+            settings::choice_row(
                 ui,
                 "Default page on open",
                 "default-page",
-                picker_w,
+                col,
                 d.default_page.label(),
                 |ui| {
                     // Only the three that always exist: not *Trash*, a project (it can be
@@ -3951,11 +4014,11 @@ impl OndinApp {
                 },
             );
             ui.add_space(settings::ROW_GAP);
-            picker_row(
+            settings::choice_row(
                 ui,
                 "Default view on open",
                 "default-view",
-                picker_w,
+                col,
                 if d.default_list_view { "List" } else { "Grid" },
                 |ui| {
                     ui.selectable_value(&mut d.default_list_view, false, "Grid");
@@ -3963,11 +4026,11 @@ impl OndinApp {
                 },
             );
             ui.add_space(settings::ROW_GAP);
-            picker_row(
+            settings::choice_row(
                 ui,
                 "Default sort",
                 "default-sort",
-                picker_w,
+                col,
                 d.default_sort.label(),
                 |ui| {
                     for s in Sort::ALL {
@@ -3990,7 +4053,7 @@ impl OndinApp {
                 d.reopen_last = !d.reopen_last;
             }
         }
-        retry
+        LibraryRows { retry, scrubbing }
     }
 
     /// Re-point the open document, and *reopen last*, at where a migration put them.
@@ -4291,86 +4354,21 @@ pub(super) fn field_label(ui: &mut egui::Ui, text: &str) {
     ui.add_space(FIELD_LABEL_GAP);
 }
 
-/// A Settings row that is a *choice*: the question on the left, a dropdown against
-/// the right margin.
-///
-/// The combo is allocated before the label (a `ui.horizontal` centres each item
-/// against the height known when it is placed) and owes the usual two corrections:
-/// [`ui::combo_chevron`] for egui's triangle and `interact_size.y` forced to the
-/// field height.
-fn picker_row(
+/// A [`settings::whole_row`] holding a count — seconds of autosave, days of trash,
+/// undo steps — from 0, which means *off*, to `max`, at the usual scrub rate for a
+/// long range. Returns whether it is being scrubbed.
+fn whole_count(
     ui: &mut egui::Ui,
     label: &str,
-    id: &'static str,
-    width: f32,
-    selected: &str,
-    options: impl FnOnce(&mut egui::Ui),
-) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = settings::COL_GAP;
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.scope(|ui| {
-                ui.spacing_mut().interact_size.y = ui::CONTROL_H;
-                ui.spacing_mut().button_padding.y = 0.0;
-                egui::ComboBox::from_id_salt(id)
-                    .icon(ui::combo_chevron)
-                    .width(width)
-                    .selected_text(ui::combo_text(selected))
-                    .show_ui(ui, |ui| {
-                        ui::menu_rows(ui);
-                        options(ui);
-                    });
-            });
-            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                ui.label(
-                    egui::RichText::new(label)
-                        .size(settings::LABEL_PT)
-                        .color(ui::switch_row_ink(true)),
-                );
-            });
-        });
-    });
-}
-
-/// A Settings field holding a whole count of something — seconds of autosave, days
-/// of trash retention. Rounded and clamped here as well as by the scrub, which
-/// settles a drag and leaves typing alone (`settings::nudge_field`'s reason). Zero
-/// is allowed: it means *off*.
-fn whole_field(
-    ui: &mut egui::Ui,
-    size: egui::Vec2,
-    label: &'static str,
     unit: &'static str,
+    tooltip: &str,
     value: &mut u64,
     max: u64,
-) {
+) -> bool {
     let mut v = *value as f64;
-    ui::value_field_suffixed(
-        ui,
-        size,
-        ui::Prefix::Text(label),
-        Some(ui::Suffix {
-            text: unit,
-            clickable: false,
-            tooltip: "",
-        }),
-        &mut v,
-        // 0.5, the rate every other whole-unit field in the app scrubs at.
-        ui::Scrub::whole(0.5).range(0.0..=max as f64),
-        |d| d.custom_formatter(ui::number(0)),
-    );
-    *value = v.round().clamp(0.0, max as f64) as u64;
-}
-
-/// A [`settings::caption`] in the warning amber ([`theme::color::warn()`]) — for a
-/// setting that is valid and has a consequence worth naming.
-fn warn_caption(ui: &mut egui::Ui, text: &str) {
-    ui.add_space(3.0);
-    ui.label(
-        egui::RichText::new(text)
-            .size(settings::CAPTION_PT)
-            .color(theme::color::warn()),
-    );
+    let scrubbing = settings::whole_row(ui, label, unit, tooltip, &mut v, (0.0, max as f64), 0.5);
+    *value = v as u64;
+    scrubbing
 }
 
 /// A section heading in the sidebar and over the *Recent* grids: an eyebrow.
@@ -5058,7 +5056,7 @@ mod tests {
             // Bounded above too, or the backdrop and central panel match.
             if let Some(r) = here
                 .into_iter()
-                .filter(|r| r.contains(eyebrow) && (300.0..400.0).contains(&r.width()))
+                .filter(|r| r.contains(eyebrow) && (400.0..560.0).contains(&r.width()))
                 .max_by(|a, b| a.height().total_cmp(&b.height()))
             {
                 card = Some(r);
@@ -5068,10 +5066,10 @@ mod tests {
         }
         let card = card.expect("the settings card");
         // The eyebrow starts at the content's left edge; the column is `set_width`'s.
-        let column = ui::menu_inner_w(settings::CARD_W, settings::PAD);
+        let column = ui::menu_inner_w(settings::SETTINGS_W, settings::PAD);
         assert_eq!(
-            column, 346.0,
-            "376 across, less 14 of padding and a hairline"
+            column, 450.0,
+            "the editor Settings' 480 across, less 14 of padding and a hairline"
         );
         // Paint order separates the modal's own text from the empty state behind it.
         for cs in full.shapes.iter().skip(card_at + 1) {
@@ -5100,6 +5098,56 @@ mod tests {
         let mut edited = saved.clone();
         edited.reopen_last = !edited.reopen_last;
         assert!(edited != saved, "and one moved row is what lights it");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A right-click during a scrub of the card's numbers puts them back where the
+    /// scrub began and spends the snapshot; one with no scrub changes nothing.
+    /// flip: drop the `library_scrub` arm from `library_settings_modal` → fails at
+    /// "back where the scrub began".
+    #[test]
+    fn a_right_click_winds_a_library_scrub_back() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, root) = app(&ctx, "settings-scrub");
+        let saved = LibrarySettings::from_prefs(&app.prefs, &app.library.root);
+        let mut scrubbed = saved.clone();
+        scrubbed.autosave_secs = 900;
+        scrubbed.history_size = 7;
+        let right_click = |app: &mut OndinApp| {
+            let at = egui::pos2(10.0, 10.0);
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::pos2(0.0, 0.0), SCREEN)),
+                events: vec![
+                    egui::Event::PointerMoved(at),
+                    egui::Event::PointerButton {
+                        pos: at,
+                        button: egui::PointerButton::Secondary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| app.dashboard_ui(ui));
+        };
+
+        app.library_settings = Some(scrubbed.clone());
+        right_click(&mut app);
+        assert_eq!(
+            app.library_settings.as_ref(),
+            Some(&scrubbed),
+            "no scrub, nothing to put back"
+        );
+
+        app.in_flight.library_scrub = Some(saved.numbers());
+        right_click(&mut app);
+        let d = app.library_settings.as_ref().expect("the card stays open");
+        assert_eq!(d.numbers(), saved.numbers(), "back where the scrub began");
+        assert!(
+            app.in_flight.library_scrub.is_none(),
+            "the snapshot is spent"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -476,7 +476,7 @@ impl OndinApp {
         acts: &mut Vec<Act>,
     ) {
         let total = parts.iter().filter(|p| matches!(p, Part::Tool(_))).count();
-        let fold_id = egui::Id::new(("assistant-unfold", msg));
+        let fold_id = egui::Id::new(("assistant-unfold", self.assistant.thread_epoch, msg));
         let unfolded = ui.data(|d| d.get_temp::<bool>(fold_id).unwrap_or(false));
         let mut seen = 0;
         let layer = |id: &str| self.layer_name(id);
@@ -533,6 +533,7 @@ impl OndinApp {
         details: &str,
         acts: &mut Vec<Act>,
     ) {
+        let details_id = egui::Id::new(("assistant-details", self.assistant.thread_epoch, msg));
         egui::Frame::NONE
             .fill(color::danger_900())
             .stroke(egui::Stroke::new(1.0, color::danger_800()))
@@ -564,7 +565,7 @@ impl OndinApp {
                         acts.push(Act::AskAgain(question));
                     }
                     if !details.trim().is_empty() {
-                        let id = egui::Id::new(("assistant-details", msg));
+                        let id = details_id;
                         let open = ui.data(|d| d.get_temp::<bool>(id).unwrap_or(false));
                         let word = if open { "Hide details" } else { "Show details" };
                         if ui::word_link(ui, word, true).clicked() {
@@ -572,8 +573,7 @@ impl OndinApp {
                         }
                     }
                 });
-                let id = egui::Id::new(("assistant-details", msg));
-                if ui.data(|d| d.get_temp::<bool>(id).unwrap_or(false)) {
+                if ui.data(|d| d.get_temp::<bool>(details_id).unwrap_or(false)) {
                     ui.add(
                         egui::Label::new(
                             egui::RichText::new(details.trim())
@@ -671,15 +671,9 @@ impl OndinApp {
                             .map(|s| (*s).to_owned())
                             .collect();
                         if !qs.is_empty() {
-                            let at = match (self.assistant.recall, up) {
-                                (None, true) => Some(qs.len() - 1),
-                                (None, false) => None,
-                                (Some(i), true) => Some(i.saturating_sub(1)),
-                                (Some(i), false) if i + 1 < qs.len() => Some(i + 1),
-                                (Some(_), false) => None,
-                            };
+                            let at = recall_step(self.assistant.recall, up, qs.len());
                             self.assistant.recall = at;
-                            draft = at.map(|i| qs[i].clone()).unwrap_or_default();
+                            draft = at.and_then(|i| qs.get(i).cloned()).unwrap_or_default();
                         }
                     }
                 }
@@ -1145,6 +1139,19 @@ fn tokens(n: u64) -> String {
     }
 }
 
+/// The question `Ctrl+↑` (`up`) or `Ctrl+↓` steps to among `len` questions,
+/// from `recall`; one past this thread's end, left from another, starts over.
+fn recall_step(recall: Option<usize>, up: bool, len: usize) -> Option<usize> {
+    match (recall.filter(|&i| i < len), up) {
+        _ if len == 0 => None,
+        (None, true) => Some(len - 1),
+        (None, false) => None,
+        (Some(i), true) => Some(i.saturating_sub(1)),
+        (Some(i), false) if i + 1 < len => Some(i + 1),
+        (Some(_), false) => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1153,5 +1160,17 @@ mod tests {
     fn token_counts_read_short() {
         assert_eq!(tokens(850), "850");
         assert_eq!(tokens(3100), "3.1k");
+    }
+
+    /// A recall left past the end by a longer thread starts at the newest.
+    /// flip: `recall_step` without its `filter` → fails at `Some(6)`.
+    #[test]
+    fn recall_from_a_longer_thread_stays_in_range() {
+        assert_eq!(recall_step(Some(7), true, 2), Some(1));
+        assert_eq!(recall_step(Some(7), false, 2), None);
+        assert_eq!(recall_step(None, true, 2), Some(1));
+        assert_eq!(recall_step(Some(1), true, 2), Some(0));
+        assert_eq!(recall_step(Some(0), false, 2), Some(1));
+        assert_eq!(recall_step(None, true, 0), None);
     }
 }

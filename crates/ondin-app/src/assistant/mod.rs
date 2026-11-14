@@ -199,14 +199,17 @@ impl Why {
 pub(crate) struct Assistant {
     pub(crate) open: bool,
     pub(crate) msgs: Vec<Msg>,
-    /// Where `msgs` are kept, and the document they belong to.
+    /// Where `msgs` are kept, and the tab and document they belong to.
     file: Option<PathBuf>,
-    doc: Option<(Option<String>, Option<PathBuf>)>,
+    doc: Option<(Option<crate::tabs::TabId>, Option<String>, Option<PathBuf>)>,
     /// Attached to the next question.
     pub(crate) chips: Vec<Chip>,
     pub(crate) draft: String,
     /// The earlier question `Ctrl+↑` has stepped to, from the newest.
     pub(crate) recall: Option<usize>,
+    /// Counts the threads shown, so a row's unfolded state, kept by message
+    /// index, does not carry over to another thread.
+    pub(crate) thread_epoch: u64,
     /// This chat's level; Settings holds the default.
     pub(crate) level: Option<Level>,
     live: Option<Live>,
@@ -270,10 +273,21 @@ impl Assistant {
     }
 
     /// Save the thread, leaving out a turn still streaming.
-    fn save(&self) {
-        if let Some(file) = &self.file {
-            let streaming = self.running.as_ref().map(|r| r.msg);
-            thread::save(file, &thread::for_saving(&self.msgs, streaming));
+    /// Write the chat; a failure is logged, since the thread is still in memory.
+    fn save(&self) -> bool {
+        let Some(file) = &self.file else {
+            return true;
+        };
+        let streaming = self.running.as_ref().map(|r| r.msg);
+        match thread::save(file, &thread::for_saving(&self.msgs, streaming)) {
+            Ok(()) => true,
+            Err(e) => {
+                log::warn!(
+                    "assistant: could not save the chat to {}: {e}",
+                    file.display()
+                );
+                false
+            }
         }
     }
 
@@ -593,6 +607,7 @@ impl OndinApp {
     /// on the one left stops, with a note.
     fn assistant_follow_document(&mut self) {
         let now = (
+            self.tabs.active,
             self.session.doc.meta().id.clone(),
             self.session.path.clone(),
         );
@@ -600,18 +615,22 @@ impl OndinApp {
             return;
         }
         // The same document under a new name or a newly minted id keeps its
-        // thread and its session, and moves its file.
-        let same = self.assistant.doc.as_ref().is_some_and(|(id, path)| {
-            (id.is_some() && *id == now.0) || (path.is_some() && *path == now.1)
+        // thread and its session, and moves its file. Two tabs holding copies
+        // of one file share an id, so the tab must match too.
+        let same = self.assistant.doc.as_ref().is_some_and(|(tab, id, path)| {
+            *tab == now.0 && ((id.is_some() && *id == now.1) || (path.is_some() && *path == now.2))
         });
         if same {
-            let file = thread::file_for(now.0.as_deref(), now.1.as_deref());
+            let file = thread::file_for(now.1.as_deref(), now.2.as_deref());
             if file != self.assistant.file {
-                if let Some(old) = &self.assistant.file {
+                // The old file goes only once the new one is written.
+                let old = std::mem::replace(&mut self.assistant.file, file);
+                if self.assistant.save()
+                    && let Some(old) = old
+                    && Some(&old) != self.assistant.file.as_ref()
+                {
                     let _ = std::fs::remove_file(old);
                 }
-                self.assistant.file = file;
-                self.assistant.save();
             }
             self.assistant.doc = Some(now);
             return;
@@ -621,7 +640,7 @@ impl OndinApp {
                 .end_session(Some("Stopped: the document in front changed."));
             self.assistant.save();
         }
-        let file = thread::file_for(now.0.as_deref(), now.1.as_deref());
+        let file = thread::file_for(now.1.as_deref(), now.2.as_deref());
         self.assistant.msgs = file.as_deref().map(thread::load).unwrap_or_default();
         self.assistant.file = file;
         self.assistant.doc = Some(now);
@@ -629,6 +648,8 @@ impl OndinApp {
         self.assistant.applied.clear();
         self.assistant.level = None;
         self.assistant.look = None;
+        self.assistant.recall = None;
+        self.assistant.thread_epoch += 1;
     }
 
     /// One event from the session, into the live turn.
@@ -709,7 +730,7 @@ impl OndinApp {
                 seconds,
                 input_tokens,
                 output_tokens,
-                ..
+                is_error,
             } => {
                 let tokens = match (input_tokens, output_tokens) {
                     (None, None) => None,
@@ -717,6 +738,15 @@ impl OndinApp {
                 };
                 if let Some(Msg::Agent { stats, .. }) = a.msgs.get_mut(msg) {
                     *stats = Some(Stats { seconds, tokens });
+                }
+                // A turn the harness ended as failed says so, whether or not it
+                // wrote a reason.
+                if is_error && let Some(r) = a.running.take() {
+                    a.msgs.push(Msg::Note(Note::Failed {
+                        text: format!("{} ended the turn with an error.", r.harness.label()),
+                        question: r.question,
+                        details: r.diagnostics,
+                    }));
                 }
                 a.running = None;
                 a.signed_out = None;
@@ -1035,6 +1065,8 @@ impl OndinApp {
         self.assistant.msgs.clear();
         self.assistant.applied.clear();
         self.assistant.signed_out = None;
+        self.assistant.recall = None;
+        self.assistant.thread_epoch += 1;
         self.assistant.save();
         self.assistant.focus = true;
     }

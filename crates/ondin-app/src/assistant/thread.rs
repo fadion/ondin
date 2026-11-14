@@ -149,16 +149,25 @@ pub(crate) fn for_saving(msgs: &[Msg], streaming: Option<usize>) -> Vec<Msg> {
             m => m.clone(),
         })
         .collect();
-    if kept.len() > KEPT {
-        kept.drain(..kept.len() - KEPT);
-    }
+    let mut dropped = kept.len().saturating_sub(KEPT);
     // A thread opening on an answer or a note has lost its question; start at a
-    // question so *Ask again* indices hold.
+    // question.
     while kept
-        .first()
+        .get(dropped)
         .is_some_and(|m| !matches!(m, Msg::Person { .. }))
     {
-        kept.remove(0);
+        dropped += 1;
+    }
+    kept.drain(..dropped);
+    // *Ask again* names its question by index, which moved with the cut; one
+    // whose question went keeps its words and loses the button.
+    for m in &mut kept {
+        if let Msg::Note(Note::Failed { text, question, .. }) = m {
+            match question.checked_sub(dropped) {
+                Some(q) => *question = q,
+                None => *m = Msg::Note(Note::Said(std::mem::take(text))),
+            }
+        }
     }
     kept
 }
@@ -206,24 +215,19 @@ pub(crate) fn load(file: &Path) -> Vec<Msg> {
         .unwrap_or_default()
 }
 
-/// Write a chat, or remove its file when it is empty.
-pub(crate) fn save(file: &Path, msgs: &[Msg]) {
+/// Write a chat through the atomic writer, or remove its file when it is empty.
+pub(crate) fn save(file: &Path, msgs: &[Msg]) -> std::io::Result<()> {
     if msgs.is_empty() {
-        let _ = std::fs::remove_file(file);
-        return;
+        return match std::fs::remove_file(file) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        };
     }
-    let Ok(bytes) = serde_json::to_vec(msgs) else {
-        return;
-    };
-    if let Some(parent) = file.parent()
-        && std::fs::create_dir_all(parent).is_err()
-    {
-        return;
+    let bytes = serde_json::to_vec(msgs).map_err(std::io::Error::other)?;
+    if let Some(parent) = file.parent() {
+        std::fs::create_dir_all(parent)?;
     }
-    let tmp = file.with_extension("json.tmp");
-    if std::fs::write(&tmp, bytes).is_ok() {
-        let _ = std::fs::rename(&tmp, file);
-    }
+    crate::atomic::write(file, &bytes)
 }
 
 #[cfg(test)]
@@ -285,6 +289,29 @@ mod tests {
         let saved = for_saving(&msgs, None);
         assert!(saved.len() <= KEPT);
         assert!(matches!(saved[0], Msg::Person { .. }));
+    }
+
+    /// Past the cap, a failure note still names its own question.
+    /// flip: `for_saving` not shifting `question` → fails at the question's text.
+    #[test]
+    fn the_cap_keeps_ask_again_on_its_question() {
+        let mut msgs = Vec::new();
+        for i in 0..70 {
+            msgs.push(person(&format!("q{i}")));
+            msgs.push(agent("a", None));
+        }
+        let asked = msgs.len();
+        msgs.push(person("last"));
+        msgs.push(Msg::Note(Note::Failed {
+            text: "stopped".into(),
+            question: asked,
+            details: String::new(),
+        }));
+        let saved = for_saving(&msgs, None);
+        let Some(Msg::Note(Note::Failed { question, .. })) = saved.last() else {
+            panic!("the note went");
+        };
+        assert_eq!(saved[*question], person("last"));
     }
 
     /// A turn still streaming is not saved, nor anything after it.

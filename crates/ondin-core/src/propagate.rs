@@ -1203,35 +1203,91 @@ pub(crate) fn untouched(
                 .any(|ck| moved_out.contains(ck) && link(*ck) == Some(*sk))
         })
         .collect();
-    let same = c.kind == s.kind
-        && c.transform == s.transform
-        && c.name == s.name
-        && c.visible == s.visible
-        && c.opacity == s.opacity
-        && c.blend == s.blend
-        && c.clip == s.clip
-        && c.fill_hidden_in_export == s.fill_hidden_in_export
-        && c.mask == s.mask
-        && c.mask_mode == s.mask_mode
-        && c.fill_rule == s.fill_rule
-        && c.paint == s.paint
-        && c.effects == s.effects
-        && c.pivot == s.pivot
-        && c.exports == s.exports
-        && c.grids == s.grids
-        && c.insets == s.insets
-        && c.display == s.display
-        && c.item == s.item
+    // Destructured without `..`, so a new field stops the build here and its
+    // author says whether a copy differing by it is touched. Every field a
+    // propagated (not `Mode::Skip`) operation writes is compared.
+    let crate::node::Node {
+        id: _,
+        parent: _,
+        children: _,
+        kind,
+        transform,
+        name,
+        visible,
+        locked: _,
+        proportions_locked: _,
+        opacity,
+        blend,
+        clip,
+        fill_hidden_in_export,
+        mask,
+        mask_mode,
+        fill_rule,
+        paint,
+        effects,
+        pivot,
+        exports,
+        grids,
+        insets,
+        display,
+        item,
+        component: _,
+        link: _,
+        swap: _,
+        set: _,
+        lineage: _,
+        variant: _,
+        props: _,
+        description: _,
+        doc_link: _,
+        credit,
+        chart: _,
+        element,
+        href,
+        origin: _,
+        modes,
+        queries,
+        corner_vars,
+        spacing_vars,
+        visible_var,
+        size_vars,
+        text_vars,
+        opacity_var,
+        styles,
+    } = s;
+    let same = c.kind == *kind
+        && c.transform == *transform
+        && c.name == *name
+        && c.visible == *visible
+        && c.opacity == *opacity
+        && c.blend == *blend
+        && c.clip == *clip
+        && c.fill_hidden_in_export == *fill_hidden_in_export
+        && c.mask == *mask
+        && c.mask_mode == *mask_mode
+        && c.fill_rule == *fill_rule
+        && c.paint == *paint
+        && c.effects == *effects
+        && c.pivot == *pivot
+        && c.exports == *exports
+        && c.grids == *grids
+        && c.insets == *insets
+        && c.display == *display
+        && c.item == *item
+        && c.credit == *credit
+        && c.element == *element
+        && c.href == *href
+        && c.queries == *queries
         // The bindings are overrides too (§5.3f): a copy differing from its
         // source by a binding alone — both literals canonical — is touched.
-        && c.modes == s.modes
-        && c.corner_vars == s.corner_vars
-        && c.spacing_vars == s.spacing_vars
-        && c.visible_var == s.visible_var
-        && c.size_vars == s.size_vars
-        && c.text_vars == s.text_vars
-        && c.opacity_var == s.opacity_var
-        && c.styles == s.styles
+        && c.modes == *modes
+        && c.corner_vars == *corner_vars
+        && c.spacing_vars == *spacing_vars
+        && c.visible_var == *visible_var
+        && c.size_vars == *size_vars
+        && c.text_vars == *text_vars
+        && c.opacity_var == *opacity_var
+        && c.styles == *styles
         // A swap is an override (§15 D983): a swapped copy is never untouched.
         && c.swap.is_none()
         && c_kids.len() == s_kids.len();

@@ -1547,3 +1547,48 @@ fn a_limit_binding_reaches_a_copy_bound_on_another_limit() {
         "the copy's own binding stays"
     );
 }
+
+/// A main's *Show fill in exports* reaches an untouched copy whole, and *Reset*
+/// writes the main's back onto a copy that set its own.
+/// flip: `propagate::mode` giving `SetFillHiddenInExport` `Mode::Skip` → fails at "follows".
+#[test]
+fn a_mains_export_fill_flag_follows_and_reset_writes_it_back() {
+    let mut f = fixture();
+    let (m, i) = (f.m, f.i);
+    commit(
+        &mut f.doc,
+        vec![Operation::SetFillHiddenInExport {
+            id: m,
+            hidden: true,
+        }],
+    );
+    assert!(f.doc.get(i).unwrap().fill_hidden_in_export(), "follows");
+    f.doc
+        .apply(&Transaction(vec![Operation::SetFillHiddenInExport {
+            id: i,
+            hidden: false,
+        }]))
+        .unwrap();
+    let ops = ondin_core::reset::reset_fields(&f.doc, &[i]);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    assert!(f.doc.get(i).unwrap().fill_hidden_in_export(), "reset");
+}
+
+/// A copy differing from its source only by an override `untouched` must see —
+/// the export-fill flag, a link address — stays when the main loses that child.
+/// flip: `untouched` dropping its `href` comparison → fails at "an address".
+#[test]
+fn a_lost_child_leaves_a_copy_that_differs_by_a_flag_or_an_address() {
+    let flag: fn(NodeId) -> Operation = |id| Operation::SetFillHiddenInExport { id, hidden: true };
+    let address: fn(NodeId) -> Operation = |id| Operation::SetHref {
+        id,
+        href: "https://x.dev".into(),
+    };
+    for (what, op) in [("the export-fill flag", flag), ("an address", address)] {
+        let mut f = fixture();
+        let (a, ia) = (f.a, f.ia);
+        f.doc.apply(&Transaction(vec![op(ia)])).unwrap();
+        commit_all(&mut f, vec![Operation::DeleteNode { id: a }]);
+        assert!(f.doc.get(ia).is_some(), "{what}");
+    }
+}

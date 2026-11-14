@@ -22,6 +22,44 @@ budget test, and the set is checked by re-running the same agent task on the old
 - **A script tool** — Command Mode (`vm.md`) exposed to agents, so a loop runs in one call. Waits on
   Command Mode.
 
+## Now · Library
+
+Documents are found by name alone: search is a lowercase substring of the display name or a
+project's name (`OndinApp::search_results`), and the scan reads only a file's first 4 KB, so the
+library knows nothing of what a document holds. A card shows its cover, name and age.
+
+- **Ranked search** — every word must match, exact before prefix before word start before
+  substring, as `assets::sets::rank_name` ranks icons; one rule for search, the palette and the
+  results page.
+- **Sortable list columns** — a click on a *Name*, *Project*, *Edited*, *Created* or *Size* header
+  (`OndinApp::file_list`) sorts by it, a second reverses; `Sort` gains a direction the sort control
+  offers too.
+- **Day headings under a date sort** — *Today*, *Yesterday*, *This week*, *Earlier*, worded as the
+  version-history card's (`versions.rs`).
+- **Search inside documents** — page, top-level frame, component and style names and text
+  content, each result saying why it matched (*page: Checkout*). An index built on the cover
+  worker (`library::cover`), which already loads the whole file, cached in `machine_dir` keyed as
+  covers are (id plus mtime), filled for off-screen documents in the background.
+- **A results page** — *Show all N results* (or `Enter` with no row steered) opens the matches as a
+  grid or list where sort, the project filter and the view switch apply; the dropdown stays capped
+  at `SEARCH_MAX`.
+- **Documents in the command palette** — *Go to document…*, recent first, ranked as search is, so
+  switching needs no trip to the library.
+- **Continue where you left off** — a wide card heading *Recent* for the last document, its cover
+  drawn at the page and camera it was left on (`LocalIndex::last_page`, `last_view`).
+- **More on a card** — page count and a kit's version on the caption's second line (*4 pages · 2h
+  ago*), and *Pages* and *Opened* list columns; from the search index, so after it.
+- **Pages on hover** — moving across a cover steps through each page's cover; needs a cover per
+  page in `Covers`, so after the card line.
+- **Kit usage on *Kits*** — *Used in N documents* on a kit's card and the documents in its menu,
+  from `kits::users`.
+- **A project page header** — the project's colour, file count, last edit and the *Recent* mosaic
+  (`mosaic_cells`), and an optional one-line description edited in *Edit project*, kept in
+  `projects.json` so no document is rewritten.
+- **Small keys** — typing over the grid opens search with that letter; `Ctrl+K` inside a project
+  searches it, with a chip to widen to the library; *Starred* and *Kits* offer *Last opened* as a
+  sort.
+
 ## Now
 
 - **Command Mode** — `architecture.md` §13, `vm.md`. Its verbs are the registry's (`ondin_core::verbs`, built). Scripts

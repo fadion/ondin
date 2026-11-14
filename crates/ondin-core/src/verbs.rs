@@ -2083,10 +2083,12 @@ pub static VERBS: &[Verb] = &[
         params: &[req("nodes", NODES, "the layers to delete")],
         run: |ctx, a| {
             let ids = a.nodes("nodes")?;
+            // A missing layer is refused here; every layer that exists is
+            // deleted, so the edit is never empty.
             for id in &ids {
                 node(ctx, *id)?;
             }
-            nothing_if_empty(build::delete(ctx.doc, &ids), "nothing to delete")
+            Ok(Done::edit(build::delete(ctx.doc, &ids)))
         },
     },
     Verb {

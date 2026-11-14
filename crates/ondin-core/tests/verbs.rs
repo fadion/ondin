@@ -5915,7 +5915,7 @@ fn ungroup_keeps_where_layers_are_drawn_and_flatten_makes_a_path() {
 
 /// `delete_node`, `reset_overrides` and `frame` refuse what would write nothing
 /// or name a missing layer, rather than answer as done or blame something else.
-/// flip: `delete_node` answering `build::delete`'s empty edit as done → fails at "a missing layer".
+/// flip: `delete_node` without its loop refusing a missing layer → fails at "a missing layer".
 #[test]
 fn verbs_that_would_write_nothing_are_refused() {
     let (mut doc, mut ids, page) = blank();

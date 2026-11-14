@@ -27,6 +27,7 @@
 
 use crate::app::OndinApp;
 use crate::input::NudgeStep;
+use crate::panels::dashboard::LibrarySettings;
 use crate::panels::paint::{PaintSlot, PrefColour};
 use crate::prefs::{CanvasPrefs, Prefs, ThemePref};
 use crate::theme::{self, color, icon};
@@ -35,7 +36,7 @@ use crate::ui::{self, FieldButton, Prefix, Scrub, Suffix};
 /// Width of a settings-shaped card, border and padding included: the library's
 /// Settings and the confirmations.
 pub(crate) const CARD_W: f32 = 376.0;
-/// The editor's Settings card: wide enough for five tab labels in their cells
+/// The editor's Settings card: wide enough for six tab labels in their cells
 /// and a [`PREF_CONTROL_W`] value column beside the longest row label.
 pub(crate) const SETTINGS_W: f32 = 480.0;
 /// The card's side inset: a canvas card's, so a modal and Batch rename are one
@@ -94,15 +95,20 @@ const PREF_CONTROL_W: f32 = 220.0;
 pub(crate) enum SettingsTab {
     #[default]
     General,
+    Library,
     Canvas,
     Text,
     Assets,
     Assistant,
 }
 
+/// How many tabs the strip holds: the length of every per-tab array.
+const TAB_COUNT: usize = 6;
+
 impl SettingsTab {
-    pub(crate) const ALL: [Self; 5] = [
+    pub(crate) const ALL: [Self; TAB_COUNT] = [
         Self::General,
+        Self::Library,
         Self::Canvas,
         Self::Text,
         Self::Assets,
@@ -112,6 +118,7 @@ impl SettingsTab {
     fn label(self) -> &'static str {
         match self {
             Self::General => "General",
+            Self::Library => "Library",
             Self::Canvas => "Canvas",
             Self::Text => "Text",
             Self::Assets => "Assets",
@@ -162,11 +169,15 @@ pub(crate) struct Settings {
     keys: std::collections::BTreeMap<String, String>,
     /// Settings ▸ Assistant; the panel's width is not the form's.
     assistant: crate::assistant::AssistantPrefs,
+    /// Settings ▸ Library: the dashboard card's draft. Its `theme` is not shown
+    /// here — the General tab's [`Self::theme`] is the one written.
+    library: LibrarySettings,
 }
 
 impl Settings {
     /// The form as the saved preferences have it — what opening the modal shows.
-    fn from_prefs(prefs: &Prefs) -> Self {
+    /// `root` is the library folder in force, which the *Base folder* row shows.
+    fn from_prefs(prefs: &Prefs, root: &std::path::Path) -> Self {
         Self {
             theme: prefs.theme,
             nudge: prefs.nudge,
@@ -182,6 +193,7 @@ impl Settings {
             photo_size: prefs.assets.photo_size.clone(),
             keys: Default::default(),
             assistant: prefs.assistant.clone(),
+            library: LibrarySettings::from_prefs(prefs, root),
         }
     }
 
@@ -209,7 +221,7 @@ impl Settings {
     /// Which tabs hold a row that differs from `saved`, in [`SettingsTab::ALL`]'s
     /// order: the strip's marks. Destructured whole, so a new field cannot be left
     /// out of every tab.
-    fn dirty_tabs(&self, saved: &Self) -> [bool; 5] {
+    fn dirty_tabs(&self, saved: &Self) -> [bool; TAB_COUNT] {
         let Self {
             theme,
             nudge,
@@ -225,12 +237,14 @@ impl Settings {
             photo_size,
             keys,
             assistant,
+            library,
         } = self;
         [
             *theme != saved.theme
                 || *tree_guides != saved.tree_guides
                 || *collapse_groups_on_open != saved.collapse_groups_on_open
                 || *resource_meter != saved.resource_meter,
+            *library != saved.library,
             *nudge != saved.nudge || *canvas != saved.canvas,
             *default_font != saved.default_font
                 || *spell_check != saved.spell_check
@@ -321,11 +335,11 @@ impl OndinApp {
             Some(_) => None,
             None => {
                 // Every tab is measured afresh: its rows may have changed since.
-                ctx.data_mut(|d| d.remove::<[f32; 5]>(tab_heights_id()));
+                ctx.data_mut(|d| d.remove::<[f32; TAB_COUNT]>(tab_heights_id()));
                 self.fonts.measure_cache(ctx);
                 let on = self.prefs.assets.photo_services.clone();
                 self.read_asset_keys(ctx, &on);
-                let mut s = Settings::from_prefs(&self.prefs);
+                let mut s = Settings::from_prefs(&self.prefs, &self.library.root);
                 s.keys = self.asset_keys.clone().unwrap_or_default();
                 Some(s)
             }
@@ -341,7 +355,7 @@ impl OndinApp {
         let Some(mut draft) = self.settings.clone() else {
             return;
         };
-        let mut saved = Settings::from_prefs(&self.prefs);
+        let mut saved = Settings::from_prefs(&self.prefs, &self.library.root);
         saved.keys = self.asset_keys.clone().unwrap_or_default();
         // A picker open on one of the form's colours takes Escape first, so the press
         // closes it rather than discarding the whole form.
@@ -364,6 +378,7 @@ impl OndinApp {
         }
 
         let mut decision = None;
+        let mut retry = false;
         let modal = card("settings", ctx, |ui| {
             ui.set_width(ui::menu_inner_w(SETTINGS_W, PAD));
             // Zero, so every vertical gap is written out: an `add_space` is added to
@@ -401,7 +416,7 @@ impl OndinApp {
             // too: an `Area` hands a scroll area last frame's size, so a maximum
             // alone never grows back.
             let heights_id = tab_heights_id();
-            let mut heights = match ui.data(|d| d.get_temp::<[f32; 5]>(heights_id)) {
+            let mut heights = match ui.data(|d| d.get_temp::<[f32; TAB_COUNT]>(heights_id)) {
                 Some(h) => h,
                 None => self.measure_tabs(ui, &draft),
             };
@@ -421,7 +436,7 @@ impl OndinApp {
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 0.0;
-                    let dragging = self.tab_rows(ui, &mut draft, tab);
+                    let dragging = self.tab_rows(ui, &mut draft, tab, &mut retry);
                     ui::keep_focus_in_view(ui);
                     dragging
                 });
@@ -469,19 +484,33 @@ impl OndinApp {
                 self.ensure_default_font();
                 self.prefs.save();
                 self.assistant_settings_saved(&before);
+                // Through the dashboard card's own apply, so a base folder moves the
+                // library the same way from either screen. Only when the tab was
+                // edited: a re-applied draft would sweep the trash for nothing.
+                if draft.library != saved.library {
+                    self.library_settings = Some(LibrarySettings {
+                        theme: self.prefs.theme,
+                        ..draft.library
+                    });
+                    self.apply_library_settings();
+                }
                 self.settings = None;
                 self.in_flight.settings_scrub = None;
             }
             // Still open: keep whatever was typed into it this frame.
             None => self.settings = Some(draft),
         }
+        // After the match, so a retry cannot race a Save that re-points the library.
+        if retry {
+            self.retry_migration();
+        }
     }
 
     /// Every tab's height as laid out now, each drawn once into an invisible child
     /// that takes no room, on a copy of the form: what the body's height is taken
     /// from as the card opens.
-    fn measure_tabs(&mut self, ui: &mut egui::Ui, draft: &Settings) -> [f32; 5] {
-        let mut out = [0.0; 5];
+    fn measure_tabs(&mut self, ui: &mut egui::Ui, draft: &Settings) -> [f32; TAB_COUNT] {
+        let mut out = [0.0; TAB_COUNT];
         let rect =
             egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), 10_000.0));
         for (i, tab) in SettingsTab::ALL.into_iter().enumerate() {
@@ -495,14 +524,21 @@ impl OndinApp {
                     .invisible(),
             );
             child.spacing_mut().item_spacing.y = 0.0;
-            self.tab_rows(&mut child, &mut scratch, tab);
+            self.tab_rows(&mut child, &mut scratch, tab, &mut false);
             out[i] = child.min_rect().height();
         }
         out
     }
 
-    /// One tab's rows, into `draft`. Returns whether a number is being scrubbed.
-    fn tab_rows(&mut self, ui: &mut egui::Ui, draft: &mut Settings, tab: SettingsTab) -> bool {
+    /// One tab's rows, into `draft`. Returns whether a number is being scrubbed;
+    /// `retry` is set when the Library tab's *Try again* is pressed.
+    fn tab_rows(
+        &mut self,
+        ui: &mut egui::Ui,
+        draft: &mut Settings,
+        tab: SettingsTab,
+        retry: &mut bool,
+    ) -> bool {
         match tab {
             SettingsTab::General => {
                 section(ui, "Layers");
@@ -535,6 +571,10 @@ impl OndinApp {
                 {
                     draft.resource_meter = !draft.resource_meter;
                 }
+                false
+            }
+            SettingsTab::Library => {
+                *retry |= self.library_rows(ui, &mut draft.library, PREF_CONTROL_W);
                 false
             }
             SettingsTab::Canvas => {
@@ -2198,6 +2238,7 @@ mod tests {
         app.toggle_settings(&ctx, None);
         for (tab, headers) in [
             (SettingsTab::General, &["LAYERS", "APPEARANCE"][..]),
+            (SettingsTab::Library, &["STORAGE", "LIBRARY", "LAUNCH"]),
             (SettingsTab::Canvas, &["WHEEL", "NUDGE", "GUIDES AND GRID"]),
             (SettingsTab::Text, &["WEB FONTS"]),
         ] {
@@ -2258,7 +2299,7 @@ mod tests {
                 small: 0.4,
                 large: 1.6,
             },
-            ..Settings::from_prefs(&app.prefs)
+            ..Settings::from_prefs(&app.prefs, &app.library.root)
         });
         let _ = ink(&mut app, &ctx);
         let got = app.settings.expect("the modal is still open").nudge;
@@ -2378,7 +2419,11 @@ mod tests {
     #[test]
     fn the_form_is_a_round_trip_through_the_preferences() {
         let mut prefs = Prefs::default();
-        let opened = Settings::from_prefs(&prefs);
+        // The Library tab is written by `apply_library_settings`, not `apply`, and
+        // has its own round-trip tests in `panels::dashboard`; here it rides along.
+        let root = std::path::Path::new("library");
+        let library = LibrarySettings::from_prefs(&prefs, root);
+        let opened = Settings::from_prefs(&prefs, root);
         assert_eq!(
             opened,
             Settings {
@@ -2396,6 +2441,7 @@ mod tests {
                 photo_size: "regular".into(),
                 keys: Default::default(),
                 assistant: Default::default(),
+                library: library.clone(),
             },
             "the form opens showing what is saved"
         );
@@ -2433,6 +2479,11 @@ mod tests {
                 instructions: "Be brief.".into(),
                 ..Default::default()
             },
+            // Its copy of the theme follows the preference, as reopening reads it.
+            library: LibrarySettings {
+                theme: ThemePref::Light,
+                ..library
+            },
         };
         assert!(edited != opened, "the fixture has to be a real edit");
         assert!(
@@ -2440,7 +2491,7 @@ mod tests {
             "moving the web-fonts switch is what the return value reports"
         );
         assert_eq!(
-            Settings::from_prefs(&prefs),
+            Settings::from_prefs(&prefs, root),
             edited,
             "everything the form holds survives being written and read back"
         );
@@ -2741,6 +2792,62 @@ mod tests {
         );
     }
 
+    /// *Save changes* writes the Library tab through the dashboard card's apply,
+    /// and the General tab's theme, not the Library draft's copy, is the one kept.
+    /// flip: drop the `library_settings` hand-off from `settings_ui`'s Save arm →
+    /// fails at the autosave assertion.
+    #[test]
+    fn saving_writes_the_library_tab_too() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        app.toggle_settings(&ctx, Some(SettingsTab::Library));
+        let mut draft = before_form(&app);
+        assert_ne!(app.prefs.autosave_secs, 90, "the fixture: a real edit");
+        draft.library.autosave_secs = 90;
+        draft.library.reopen_last = !app.prefs.reopen_last;
+        draft.theme = ThemePref::Light;
+        let want_reopen = draft.library.reopen_last;
+        app.settings = Some(draft);
+        let runs = galleys(&mut app, &ctx);
+        let (pos, size, _) = runs
+            .iter()
+            .find(|(_, _, t)| t == "Save changes")
+            .expect("the footer shows");
+        click(&ctx, &mut app, *pos + *size / 2.0);
+        assert!(
+            app.settings.is_none(),
+            "the press saved and closed the card"
+        );
+        assert_eq!(app.prefs.autosave_secs, 90);
+        assert_eq!(app.prefs.reopen_last, want_reopen);
+        assert_eq!(app.prefs.theme, ThemePref::Light, "General's theme wins");
+        assert!(app.library_settings.is_none(), "the hand-off is spent");
+    }
+
+    /// Every tab's label fits inside its own cell of the strip, with room to
+    /// spare for the edit dot.
+    /// flip: `SETTINGS_W` at 300 → fails for "Assistant".
+    #[test]
+    fn every_tab_label_fits_its_cell() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        app.toggle_settings(&ctx, None);
+        let runs = galleys(&mut app, &ctx);
+        let cell = ui::menu_inner_w(SETTINGS_W, PAD) / SettingsTab::ALL.len() as f32;
+        for tab in SettingsTab::ALL {
+            let (_, size, _) = runs
+                .iter()
+                .find(|(_, _, t)| t == tab.label())
+                .unwrap_or_else(|| panic!("no {:?} label", tab.label()));
+            assert!(
+                size.x + 2.0 * ui::SEGMENT_MARK_R + 12.0 <= cell,
+                "{:?} is {:.1} wide in a {cell:.1} cell",
+                tab.label(),
+                size.x
+            );
+        }
+    }
+
     /// A tab holding an edit is marked, and only that tab; switching tabs keeps
     /// the edit and its mark, and putting the value back takes the mark off.
     /// flip: `dirty_tabs` comparing `canvas` on the General tab → fails at the
@@ -2755,7 +2862,7 @@ mod tests {
         edited.canvas.guide_thickness += 1;
         assert_eq!(
             edited.dirty_tabs(&saved),
-            [false, true, false, false, false]
+            [false, false, true, false, false, false]
         );
         app.settings = Some(edited.clone());
         // The strip paints the dot: a circle of its radius.
@@ -2812,7 +2919,7 @@ mod tests {
             let _ = ctx.run_ui(input, |ui| app.settings_ui(ui.ctx()));
         };
         run(&mut app, vec![key(egui::Modifiers::COMMAND)]);
-        assert_eq!(app.settings_tab, SettingsTab::Canvas);
+        assert_eq!(app.settings_tab, SettingsTab::Library);
         run(
             &mut app,
             vec![key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT)],

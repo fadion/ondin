@@ -1203,6 +1203,7 @@ fn sweep_on(theme: Theme) {
     // Every tab, since each shows only its own rows.
     let names = [
         "settings: General",
+        "settings: Library",
         "settings: Canvas",
         "settings: Text",
         "settings: Assets",

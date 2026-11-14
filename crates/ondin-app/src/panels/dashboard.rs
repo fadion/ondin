@@ -383,7 +383,7 @@ pub(crate) struct Stranded {
 /// it is a draft. `PartialEq` lights *Save changes* when it differs from
 /// [`LibrarySettings::from_prefs`]; the derive hides an unread field from
 /// `dead_code`, so read the struct against the modal after removing a row.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct LibrarySettings {
     /// The chrome's theme; the same preference the editor's Settings writes.
     pub(crate) theme: crate::prefs::ThemePref,
@@ -3576,6 +3576,7 @@ impl OndinApp {
                         ui,
                         "Otherwise move them to",
                         "transfer-to",
+                        PICKER_W,
                         &dp.transfer_to
                             .as_ref()
                             .and_then(|t| others.iter().find(|(oid, ..)| oid == t))
@@ -3743,11 +3744,7 @@ impl OndinApp {
             return;
         };
         let saved = LibrarySettings::from_prefs(&self.prefs, &self.library.root);
-        let resolved_now = self.library.root.display().to_string();
         let mut decision: Option<settings::Decision> = None;
-        // Cloned out and answered after the card: a retry runs a whole migration, which
-        // must not happen inside a paint.
-        let stranded = self.stranded.clone();
         let mut retry = false;
 
         let modal = settings::card("library-settings", ctx, |ui| {
@@ -3760,6 +3757,49 @@ impl OndinApp {
             }
 
             settings::theme_section(ui, &mut d.theme);
+            retry = self.library_rows(ui, &mut d, PICKER_W);
+
+            if let Some(x) = settings::modal_footer(ui, "Save changes", d != saved) {
+                decision = Some(x);
+            }
+        });
+
+        // The backdrop and Escape both cancel; read after the body, which they consume.
+        if modal.should_close() {
+            decision = Some(settings::Decision::Cancel);
+        }
+
+        match decision {
+            Some(settings::Decision::Cancel) => self.library_settings = None,
+            Some(settings::Decision::Save) => {
+                self.library_settings = Some(d);
+                self.apply_library_settings();
+            }
+            // Still open: keep whatever was typed into it this frame.
+            None => self.library_settings = Some(d),
+        }
+        // After the match, so a retry cannot race a Save that re-points the library.
+        // Cancel leaves the report standing.
+        if retry {
+            self.retry_migration();
+        }
+    }
+
+    /// The library's rows, below the theme: storage, how the dashboard opens, and
+    /// what launch reopens. Shared by the dashboard's card and the editor Settings'
+    /// *Library* tab; `picker_w` is the host card's dropdown column. Returns
+    /// whether *Try again* was pressed, which the caller answers after its card,
+    /// since a retry runs a whole migration and must not happen inside a paint.
+    pub(crate) fn library_rows(
+        &self,
+        ui: &mut egui::Ui,
+        d: &mut LibrarySettings,
+        picker_w: f32,
+    ) -> bool {
+        let resolved_now = self.library.root.display().to_string();
+        let stranded = &self.stranded;
+        let mut retry = false;
+        {
             settings::section(ui, "Storage");
             field_label(ui, "Base folder");
             // The button is allocated first, in a right-to-left row, so the field takes
@@ -3816,7 +3856,7 @@ impl OndinApp {
 
             // What the last migration left behind: named files and the folder, which a
             // status line cannot hold. Below the switch, which is about the next move.
-            if let Some(report) = &stranded {
+            if let Some(report) = stranded {
                 ui.add_space(settings::ROW_GAP);
                 warn_caption(
                     ui,
@@ -3899,6 +3939,7 @@ impl OndinApp {
                 ui,
                 "Default page on open",
                 "default-page",
+                picker_w,
                 d.default_page.label(),
                 |ui| {
                     // Only the three that always exist: not *Trash*, a project (it can be
@@ -3914,6 +3955,7 @@ impl OndinApp {
                 ui,
                 "Default view on open",
                 "default-view",
+                picker_w,
                 if d.default_list_view { "List" } else { "Grid" },
                 |ui| {
                     ui.selectable_value(&mut d.default_list_view, false, "Grid");
@@ -3925,6 +3967,7 @@ impl OndinApp {
                 ui,
                 "Default sort",
                 "default-sort",
+                picker_w,
                 d.default_sort.label(),
                 |ui| {
                     for s in Sort::ALL {
@@ -3933,7 +3976,9 @@ impl OndinApp {
                 },
             );
 
-            settings::section(ui, "General");
+            // Not *General*: in the editor this sits on the *Library* tab, beside a
+            // *General* tab.
+            settings::section(ui, "Launch");
             if ui::switch_row(
                 ui,
                 "Reopen the last file on launch",
@@ -3944,31 +3989,8 @@ impl OndinApp {
             {
                 d.reopen_last = !d.reopen_last;
             }
-
-            if let Some(x) = settings::modal_footer(ui, "Save changes", d != saved) {
-                decision = Some(x);
-            }
-        });
-
-        // The backdrop and Escape both cancel; read after the body, which they consume.
-        if modal.should_close() {
-            decision = Some(settings::Decision::Cancel);
         }
-
-        match decision {
-            Some(settings::Decision::Cancel) => self.library_settings = None,
-            Some(settings::Decision::Save) => {
-                self.library_settings = Some(d);
-                self.apply_library_settings();
-            }
-            // Still open: keep whatever was typed into it this frame.
-            None => self.library_settings = Some(d),
-        }
-        // After the match, so a retry cannot race a Save that re-points the library.
-        // Cancel leaves the report standing.
-        if retry {
-            self.retry_migration();
-        }
+        retry
     }
 
     /// Re-point the open document, and *reopen last*, at where a migration put them.
@@ -4280,6 +4302,7 @@ fn picker_row(
     ui: &mut egui::Ui,
     label: &str,
     id: &'static str,
+    width: f32,
     selected: &str,
     options: impl FnOnce(&mut egui::Ui),
 ) {
@@ -4291,7 +4314,7 @@ fn picker_row(
                 ui.spacing_mut().button_padding.y = 0.0;
                 egui::ComboBox::from_id_salt(id)
                     .icon(ui::combo_chevron)
-                    .width(PICKER_W)
+                    .width(width)
                     .selected_text(ui::combo_text(selected))
                     .show_ui(ui, |ui| {
                         ui::menu_rows(ui);

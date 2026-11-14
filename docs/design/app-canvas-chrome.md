@@ -415,13 +415,14 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
 
 - Rightmost: `icon::SLIDERS`, 28pt, ten points clear of the document's controls. The update chip
   sits between it and that gap. The window's caption buttons are in the tab strip above.
-- Opens `settings.rs`'s modal, `SETTINGS_W` (480) wide so five tab labels fit their cells; the
+- Opens `settings.rs`'s modal, `SETTINGS_W` (480) wide so six tab labels fit their cells; the
   library's Settings and the confirmations stay `CARD_W` (376). Under the title row, a full-width
   `ui::segmented` strip of `SettingsTab`s at `ui::SEGMENT_CELL_H` picks what the body shows:
 
   | Tab | Rows |
   | --- | --- |
   | **General** | **Layers** (*Show tree guides*, *Collapse groups on open*), **Appearance** (the theme track, *Show resource meter*; the library's Settings shares the theme row only) |
+  | **Library** | the library's Settings card below its theme row, drawn by the same `OndinApp::library_rows`: **Storage** (*Base folder*, the migrate switch and the stranded report, *Autosave*, *Trash*, *Keep version history*, *Undo history*), **Library** (default page, view and sort), **Launch** (*Reopen the last file on launch*). Its dropdowns take the `PREF_CONTROL_W` column. Save hands the draft to `apply_library_settings` only when this tab was edited, so a base folder moves the library the same way from either screen; the General tab's theme is the one written |
   | **Canvas** | **Wheel** (*Zoom with the scroll wheel* and its caption, `tools.md` *The wheel*), **Nudge** (*Step*, *Shift*), **Guides and grid** (*Ruler guides colour* and *thickness*, *Adaptive pixel grid*, *Pixel grid colour*, dimmed with *Turn off Adaptive pixel grid to pick a colour* while adaptive is on; `app-rulers-guides.md`, `prefs::CanvasPrefs`) |
   | **Text** | no eyebrow, which would repeat the tab's name: *Default font* (the typography panel's family dropdown, its glyph `warn()` with a tooltip when the family is `Missing`, §5.4a), *Check spelling*; then **Web fonts** (the switch, the cache row) |
   | **Assets** | *Assets browser*, below |

@@ -1461,32 +1461,15 @@ impl OndinApp {
             }
             ui.add_space(ROW_GAP);
             labelled_row(ui, "Model", |ui| {
-                ui::text_field(
+                ui::suggest_field(
                     ui,
                     egui::vec2(PREF_CONTROL_W, FIELD_H),
                     &mut a.model,
                     "Its default",
+                    on.map_or(&[][..], |h| h.model_suggestions()),
+                    "Suggested models",
                 )
             });
-            let chips = on.map_or(&[][..], |h| h.model_suggestions());
-            if !chips.is_empty() {
-                ui.add_space(4.0);
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
-                    for m in chips {
-                        let w = ui::label_button_noted_w(ui.ctx(), m, "").max(40.0);
-                        let state = match a.model == *m {
-                            true => ui::FieldButton::On,
-                            false => ui::FieldButton::Off,
-                        };
-                        if ui::label_button(ui, m, egui::vec2(w, ui::BADGE_FIELD_H), state)
-                            .clicked()
-                        {
-                            a.model = (*m).to_owned();
-                        }
-                    }
-                });
-            }
             let levels = on.map_or(&[][..], |h| h.effort_levels());
             if !levels.is_empty() {
                 ui.add_space(ROW_GAP);

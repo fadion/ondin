@@ -608,7 +608,7 @@ read, since they name this document's node ids.
   linked chart hides the adds and shows its source line under the toolbar.
 - **The grid** is one focusable region that locks the arrows, `Tab` and `Escape` while it has
   the keyboard, so the canvas keymap stays quiet (undo, redo and save still reach the
-  document); it keeps `Tab` from the card's focus ring (`ui::keep_tab`). A header row of column names, each with its type tag (`Aa` text, `#` number), a
+  document); it keeps `Tab` from the card's focus ring (`ui::keep_tab`, each frame it has the focus). A header row of column names, each with its type tag (`Aa` text, `#` number), a
   series' swatch, the name (dim when unmapped) and, against the right edge, its role's mark: the
   category's `icon::KEY` (11 pt, faint; tooltip *The chart's categories*, a scatter's *The chart's
   X values*) or a Sankey's *From*, *To* or *Value* in words. The name is cut with an ellipsis

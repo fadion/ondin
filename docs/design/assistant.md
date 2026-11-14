@@ -91,7 +91,8 @@ name (`claude`) and a speaker name (*Claude*) shown on its replies. An unknown s
 ### Model and effort
 
 - **The model is free text**, passed verbatim; empty omits the flag. Each harness offers a few
-  suggestions as chips, never as the permitted set.
+  suggestions (`Harness::model_suggestions`) in the field's list and ghost, never as the permitted
+  set.
 - **Effort uses each harness's own words** (`Harness::effort_levels`), and a level not on its list
   is never sent. Codex, Copilot and Cursor have none, so the Effort row is hidden: Copilot's flag
   fails the turn on its default `auto` model, and Cursor's effort is part of the model id.
@@ -275,7 +276,8 @@ of it is a secret.
 - **Path** — the program's path, empty for found automatically. Settings looks it up for the agent
   and path on screen, saved or not, with its own lookup beside the panel's: a spinner after the
   label while it looks, then *Found …* in the accent ink or *Not found* in the error's.
-- **Model** — free text with the harness's suggestions as chips.
+- **Model** — free text in a `ui::suggest_field` (*Its default* as the hint, *Suggested models*
+  on the chevron): the harness's suggestions in its list and as a ghost `Tab` fills.
 - **Effort** — the harness's own levels; hidden where it has none.
 - **Access** — *Look*, *Propose*, *Edit*: the default for a new chat. Each cell's tooltip says
   what the level lets the agent do, in the panel's level menu's words.

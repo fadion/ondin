@@ -2296,6 +2296,325 @@ pub fn text_field_glyph(
     })
 }
 
+/// A [`suggest_field`]'s list, kept between frames under the edit's id.
+#[derive(Clone, Default)]
+struct SuggestList {
+    open: bool,
+    /// The row the keys light: `0` is the hint's (the empty field), `1 + i` is
+    /// `names[i]`.
+    lit: Option<usize>,
+    /// The text as the list opened: its row wears the tick while typing moves on.
+    was: String,
+}
+
+/// The first of `names` that starts with `text`, ignoring case, and is longer
+/// than it: what a [`suggest_field`] offers after the caret. None for no text.
+pub fn suggestion(text: &str, names: &[&str]) -> Option<usize> {
+    if text.is_empty() {
+        return None;
+    }
+    let low = text.to_lowercase();
+    let n = text.chars().count();
+    names
+        .iter()
+        .position(|name| name.chars().count() > n && name.to_lowercase().starts_with(&low))
+}
+
+/// A free-text field that knows likely values, `names`: a [`text_field`] with a
+/// chevron at its right end that lists them under `hint`'s own row (which empties
+/// the field), and, while typing at the end of the text, the first name it starts
+/// ([`suggestion`]) as a faint ghost after the caret that `Tab` fills. The list
+/// never filters, so its size never changes; typing lights the ghost's row,
+/// `↑`/`↓` move the light, `Enter` or `Tab` take it, `Escape` closes it and
+/// `Alt+↓` opens it. Nothing else commits the ghost. No names, no chevron.
+pub fn suggest_field(
+    ui: &mut egui::Ui,
+    size: egui::Vec2,
+    text: &mut String,
+    hint: &str,
+    names: &[&str],
+    tip: &str,
+) -> egui::Response {
+    if names.is_empty() {
+        return text_field(ui, size, text, hint);
+    }
+    let ctx = ui.ctx().clone();
+    let id = ui.next_auto_id().with("suggest");
+    let list_id = id.with("list");
+    let mut list = ctx
+        .data(|d| d.get_temp::<SuggestList>(list_id))
+        .unwrap_or_default();
+    let rows = names.len() + 1;
+    let row_text = |i: usize| match i {
+        0 => String::new(),
+        i => names[i - 1].to_owned(),
+    };
+    let at_end = |text: &str| {
+        let n = text.chars().count();
+        egui::TextEdit::load_state(&ctx, id)
+            .and_then(|s| s.cursor.char_range())
+            .is_none_or(|r| r.is_empty() && r.primary.index == egui::text::CharIndex(n))
+    };
+    let mut taken: Option<String> = None;
+    let mut fill: Option<String> = None;
+
+    // The keys, read before the edit sees them. `Tab` and `Shift+Tab` reach here
+    // only on a frame after one that kept them (`keep_tab` below).
+    if ctx.memory(|m| m.has_focus(id)) {
+        let ghost = suggestion(text, names).filter(|_| at_end(text));
+        let key = |k: egui::Key, m: egui::Modifiers| ctx.input_mut(|i| i.consume_key(m, k));
+        let none = egui::Modifiers::NONE;
+        let kept = ghost.is_some() || list.open && list.lit.is_some();
+        if list.open {
+            if key(egui::Key::ArrowDown, none) {
+                list.lit = Some(list.lit.map_or(0, |i| (i + 1).min(rows - 1)));
+            }
+            if key(egui::Key::ArrowUp, none) {
+                list.lit = Some(list.lit.map_or(0, |i| i.saturating_sub(1)));
+            }
+            if key(egui::Key::Escape, none) {
+                list.open = false;
+            }
+            if key(egui::Key::Enter, none) {
+                taken = list.lit.map(row_text);
+                list.open = false;
+            }
+        } else if key(egui::Key::ArrowDown, egui::Modifiers::ALT) {
+            list = SuggestList {
+                open: true,
+                lit: ghost.map(|g| g + 1).or_else(|| ticked(text, names)),
+                was: text.clone(),
+            };
+        }
+        if kept && key(egui::Key::Tab, egui::Modifiers::SHIFT) {
+            list.open = false;
+            pass_tab(ui, true);
+        } else if kept && key(egui::Key::Tab, none) {
+            match (list.open, list.lit) {
+                (true, Some(i)) => taken = Some(row_text(i)),
+                _ => fill = ghost.map(|g| names[g].to_owned()),
+            }
+            list.open = false;
+        }
+    }
+
+    let set = taken.or(fill);
+    if let Some(t) = &set {
+        t.clone_into(text);
+    }
+
+    let pt = Scale::of(size.y).text_pt();
+    let font = egui::FontId::proportional(pt);
+    let frame = field_frame().inner_margin(egui::Margin {
+        left: FIELD_PAD_X as i8,
+        right: FIELD_BUTTON_INSET as i8,
+        top: 0,
+        bottom: 0,
+    });
+    let (mut out, chevron) = framed_row(ui, size, frame, true, |ui| {
+        let gap = 4.0;
+        ui.spacing_mut().item_spacing.x = gap;
+        let room = (ui.available_width() - FIELD_BUTTON - gap).max(12.0);
+        let pad = edit_frame(ui, &font, size.y - FIELD_BORDER_H, 0.0);
+        let edit = egui::TextEdit::singleline(text)
+            .id(id)
+            .font(font.clone())
+            .hint_text(egui::RichText::new(hint).size(pt));
+        let out = pad.show(ui, room, edit);
+        let open = list.open;
+        let chevron = icon_button(
+            ui,
+            icon::CARET_DOWN,
+            FIELD_BUTTON,
+            COMBO_CHEVRON_PT,
+            open,
+            true,
+        )
+        .on_hover_text(tip);
+        (out, chevron)
+    });
+    // The whole field, hairline to hairline: what the list hangs under.
+    let field = egui::Rect::from_min_max(
+        egui::pos2(
+            out.response.response.rect.left() - FIELD_PAD_X,
+            chevron.rect.center().y - size.y / 2.0,
+        ),
+        egui::pos2(
+            chevron.rect.right() + FIELD_BUTTON_INSET,
+            chevron.rect.center().y + size.y / 2.0,
+        ),
+    );
+    let resp = &mut out.response.response;
+    if set.is_some() {
+        // The caret after the filled name, the focus kept for more typing.
+        let end = egui::text::CCursor::new(text.chars().count());
+        out.state
+            .cursor
+            .set_char_range(Some(egui::text::CCursorRange::one(end)));
+        out.state.clone().store(&ctx, id);
+        resp.request_focus();
+        resp.mark_changed();
+    }
+    if chevron.clicked() {
+        list = match list.open {
+            true => SuggestList::default(),
+            false => SuggestList {
+                open: true,
+                lit: ticked(text, names),
+                was: text.clone(),
+            },
+        };
+    }
+    // Typing with the list open lights the row the ghost names.
+    let ghost = suggestion(text, names).filter(|_| resp.has_focus() && at_end(text));
+    if resp.changed() && list.open {
+        list.lit = ghost.map(|g| g + 1);
+    }
+
+    // The ghost, in the hint's ink right after the text, cut before the chevron.
+    if let Some(g) = ghost {
+        let x = out.galley_pos.x + out.galley.size().x;
+        let room = out.text_clip_rect.right() - x;
+        if room > 4.0 {
+            let ink = ui.visuals().weak_text_color();
+            let rest: String = names[g].chars().skip(text.chars().count()).collect();
+            let mut job = egui::text::LayoutJob::simple_singleline(rest, font.clone(), ink);
+            job.wrap = egui::text::TextWrapping::truncate_at_width(room);
+            let galley = ui.painter().layout_job(job);
+            ui.painter()
+                .galley(egui::pos2(x, out.galley_pos.y), galley, ink);
+        }
+    }
+    if resp.has_focus() {
+        if ghost.is_some() || list.open && list.lit.is_some() {
+            keep_tab(&ctx, id);
+        }
+        // After the edit, which sets its own filter every frame.
+        ctx.memory_mut(|m| {
+            m.set_focus_lock_filter(
+                id,
+                egui::EventFilter {
+                    tab: ghost.is_some() || list.open && list.lit.is_some(),
+                    horizontal_arrows: true,
+                    vertical_arrows: true,
+                    escape: list.open,
+                },
+            )
+        });
+    }
+
+    if list.open {
+        let chosen = suggest_list(ui, list_id, field, hint, names, &mut list);
+        if let Some(i) = chosen {
+            *text = row_text(i);
+            list.open = false;
+            resp.request_focus();
+            resp.mark_changed();
+        }
+        // Closed by a press anywhere else, or by the keys taking the focus to
+        // another control. A press on a row or the chevron leaves none focused.
+        let at = ctx.pointer_interact_pos();
+        let list_rect = ctx.memory(|m| m.area_rect(list_id));
+        let off = |r: Option<egui::Rect>| at.is_none_or(|p| !r.is_some_and(|r| r.contains(p)));
+        let pressed = ctx.input(|i| i.pointer.any_pressed());
+        let elsewhere = ctx
+            .memory(|m| m.focused())
+            .is_some_and(|f| f != id && f != chevron.id);
+        if pressed && off(list_rect) && off(Some(field)) || elsewhere {
+            list.open = false;
+        }
+    }
+    if !list.open {
+        list.lit = None;
+    }
+    ctx.data_mut(|d| d.insert_temp(list_id, list));
+    out.response.response
+}
+
+/// The row of a [`suggest_field`]'s list that `text` is: the hint's for none.
+fn ticked(text: &str, names: &[&str]) -> Option<usize> {
+    match text.is_empty() {
+        true => Some(0),
+        false => names.iter().position(|n| *n == text).map(|i| i + 1),
+    }
+}
+
+/// A [`suggest_field`]'s open list, under `field` with its left edge and at least
+/// its width: `hint`'s row, a rule, then `names`, the text it opened on ticked and
+/// the keys' row lit. Answers the row clicked.
+fn suggest_list(
+    ui: &egui::Ui,
+    id: egui::Id,
+    field: egui::Rect,
+    hint: &str,
+    names: &[&str],
+    list: &mut SuggestList,
+) -> Option<usize> {
+    let ctx = ui.ctx();
+    let label_w = std::iter::once(hint)
+        .chain(names.iter().copied())
+        .map(|t| {
+            ctx.fonts_mut(|f| {
+                f.layout_no_wrap(
+                    t.to_owned(),
+                    egui::FontId::proportional(SMALL_PT),
+                    egui::Color32::PLACEHOLDER,
+                )
+                .size()
+                .x
+            })
+        })
+        .fold(0.0_f32, f32::max);
+    let w = field
+        .width()
+        .max(MENU_LABEL_X + label_w + 8.0 + 2.0 * (MENU_PAD + MENU_BORDER))
+        .ceil();
+    let size = egui::vec2(w, menu_height(names.len() + 1, 1));
+    // The pointer moving over the list takes the light from the keys.
+    if ctx.input(|i| i.pointer.delta() != egui::Vec2::ZERO)
+        && ctx
+            .pointer_hover_pos()
+            .zip(ctx.memory(|m| m.area_rect(id)))
+            .is_some_and(|(p, r)| r.contains(p))
+    {
+        list.lit = None;
+    }
+    let tick = ticked(&list.was, names);
+    let lit = list.lit;
+    let shown = egui::Area::new(id)
+        .order(egui::Order::Foreground)
+        .fixed_pos(dropdown_place(ctx, field, size, DROPDOWN_GAP))
+        .show(ctx, |ui| {
+            menu_frame(MENU_PAD)
+                .show(ui, |ui| {
+                    ui.set_width(menu_inner_w(w, MENU_PAD));
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    let mut chosen = None;
+                    for i in 0..=names.len() {
+                        let label = match i {
+                            0 => hint,
+                            i => names[i - 1],
+                        };
+                        let mut row = MenuRow::new("", label).checked(tick == Some(i));
+                        if let Some(l) = lit {
+                            row = row.highlight(l == i);
+                        }
+                        if menu_row(ui, row, MENU_ROW_H).clicked() {
+                            chosen = Some(i);
+                        }
+                        if i == 0 {
+                            menu_sep(ui);
+                        }
+                    }
+                    chosen
+                })
+                .inner
+        });
+    // Above the modal it opens from, which a press on the card raises.
+    ctx.move_to_top(shown.response.layer_id);
+    shown.inner
+}
+
 /// What a [`text_area`] holds besides its text.
 pub struct TextArea<'a> {
     pub hint: &'a str,
@@ -4648,7 +4967,12 @@ impl KeyboardFocus {
         let pointed = !keyed && ctx.input(|i| i.pointer.any_pressed());
         let escaped = ctx.input(|i| i.key_pressed(egui::Key::Escape));
         let focused = ctx.memory(|m| m.focused());
-        let kept = ctx.data(|d| d.get_temp::<egui::Id>(kept_tab_id()));
+        // Spent here, so a control keeps `Tab` only on frames it asked to.
+        let kept = ctx.data_mut(|d| {
+            let kept = d.get_temp::<egui::Id>(kept_tab_id());
+            d.remove::<egui::Id>(kept_tab_id());
+            kept
+        });
         let tab = pressed
             .filter(|_| focused.is_some() || !canvas_tab)
             .filter(|_| focused.is_none() || focused != kept);
@@ -4753,15 +5077,22 @@ pub fn hold_tab(ui: &egui::Ui) {
 
 /// Leaves `Tab` with the focused control `id`, which reads it itself (the chart
 /// data grid moves its cursor), rather than [`hold_tab`]'s surface moving the
-/// focus on. Call it every frame `id` holds the focus; egui's own focus lock
-/// filter does not reach the surface's ring.
+/// focus on. It holds for the next frame only, so call it on every frame `id`
+/// wants the key; egui's own focus lock filter does not reach the surface's ring.
 pub fn keep_tab(ctx: &egui::Context, id: egui::Id) {
     ctx.data_mut(|d| d.insert_temp(kept_tab_id(), id));
 }
 
-/// The control that last called [`keep_tab`].
+/// The control that called [`keep_tab`] last frame.
 fn kept_tab_id() -> egui::Id {
     egui::Id::new("focus-kept-tab")
+}
+
+/// Moves the focus one stop along the surface `ui` draws, as `Tab` (or, `back`,
+/// `Shift+Tab`) would: for a control that kept this frame's `Tab` ([`keep_tab`])
+/// and finds it has no use for it after all.
+pub fn pass_tab(ui: &egui::Ui, back: bool) {
+    cycle_focus(ui.ctx(), ui.layer_id(), back, Pass::Last);
 }
 
 /// Which frame's controls [`cycle_focus`] walks.
@@ -8719,6 +9050,179 @@ mod tests {
             text, "F",
             "typing into a focused hex field should replace the colour, not extend it"
         );
+    }
+
+    /// The ghost is the first name the text starts, ignoring case, and only one
+    /// longer than the text.
+    /// flip: `suggestion` without its length test → fails at the whole name.
+    #[test]
+    fn a_suggestion_is_the_first_longer_name_the_text_starts() {
+        let names = ["haiku", "sonnet", "opus"];
+        assert_eq!(suggestion("s", &names), Some(1));
+        assert_eq!(suggestion("SO", &names), Some(1), "ignoring case");
+        assert_eq!(suggestion("h", &names), Some(0));
+        assert_eq!(
+            suggestion("sonnet", &names),
+            None,
+            "a whole name offers nothing"
+        );
+        assert_eq!(suggestion("x", &names), None);
+        assert_eq!(suggestion("", &names), None, "no text, no ghost");
+        let open = ["opencode/claude-sonnet-5", "opencode/gpt-5"];
+        assert_eq!(
+            suggestion("openc", &open),
+            Some(0),
+            "the first in list order"
+        );
+        assert_eq!(suggestion("opencode/g", &open), Some(1));
+    }
+
+    /// One frame of a `suggest_field` over three names; answers the edit's rect.
+    fn suggest_frame(
+        ctx: &egui::Context,
+        text: &mut String,
+        events: Vec<egui::Event>,
+    ) -> egui::Rect {
+        let mut rect = egui::Rect::NOTHING;
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                // The app's own `Tab` handling, as a card holding it runs it.
+                let _focus = KeyboardFocus::begin(ui.ctx(), false);
+                hold_tab(ui);
+                let names = ["haiku", "sonnet", "opus"];
+                let size = egui::vec2(220.0, CONTROL_H);
+                rect =
+                    suggest_field(ui, size, text, "Its default", &names, "Suggested models").rect;
+            },
+        );
+        rect
+    }
+
+    fn key_event(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }
+    }
+
+    /// A focused `suggest_field` with `typed` typed into it, a frame settled.
+    fn suggest_typed(ctx: &egui::Context, text: &mut String, typed: &str) -> Option<egui::Id> {
+        theme::install(ctx);
+        let at = suggest_frame(ctx, text, vec![]).center();
+        let click = vec![
+            egui::Event::PointerMoved(at),
+            press(at, true),
+            press(at, false),
+        ];
+        suggest_frame(ctx, text, click);
+        if !typed.is_empty() {
+            suggest_frame(ctx, text, vec![egui::Event::Text(typed.to_owned())]);
+        }
+        suggest_frame(ctx, text, vec![]);
+        ctx.memory(|m| m.focused())
+    }
+
+    /// `Tab` fills the ghost, spelled as the name is, and keeps the focus; with
+    /// nothing left to fill, `Tab` walks on.
+    /// flip: `suggest_field` not calling `keep_tab` → fails at "filled": the
+    /// surface's `KeyboardFocus` moves the focus before the field reads the key.
+    #[test]
+    fn tab_fills_the_ghost_and_keeps_the_focus() {
+        let ctx = egui::Context::default();
+        let mut text = String::new();
+        let field = suggest_typed(&ctx, &mut text, "SO");
+        assert!(field.is_some(), "the fixture: the click focused the field");
+        assert_eq!(text, "SO");
+        suggest_frame(
+            &ctx,
+            &mut text,
+            vec![key_event(egui::Key::Tab, egui::Modifiers::NONE)],
+        );
+        assert_eq!(text, "sonnet", "filled, spelled as the name is");
+        assert_eq!(ctx.memory(|m| m.focused()), field, "the focus stays");
+        suggest_frame(&ctx, &mut text, vec![]);
+        assert_eq!(ctx.memory(|m| m.focused()), field, "and settles there");
+        suggest_frame(
+            &ctx,
+            &mut text,
+            vec![key_event(egui::Key::Tab, egui::Modifiers::NONE)],
+        );
+        suggest_frame(&ctx, &mut text, vec![]);
+        assert_eq!(text, "sonnet");
+        assert_ne!(
+            ctx.memory(|m| m.focused()),
+            field,
+            "a whole name: Tab walks on"
+        );
+    }
+
+    /// `Alt+↓` opens the list lit on the value's row, `↓` moves the light and
+    /// `Enter` takes it; `Escape` closes the list and keeps the text and focus.
+    /// flip: drop the `Escape` arm of `suggest_field`'s open-list keys → fails at
+    /// "Escape closes the list".
+    #[test]
+    fn the_list_is_driven_by_the_keys() {
+        let ctx = egui::Context::default();
+        let mut text = String::new();
+        let field = suggest_typed(&ctx, &mut text, "");
+        let list = |ctx: &egui::Context| {
+            let id = field.expect("focused").with("list");
+            ctx.data(|d| d.get_temp::<SuggestList>(id))
+                .unwrap_or_default()
+        };
+        suggest_frame(
+            &ctx,
+            &mut text,
+            vec![key_event(egui::Key::ArrowDown, egui::Modifiers::ALT)],
+        );
+        assert!(list(&ctx).open, "Alt+↓ opens it");
+        assert_eq!(
+            list(&ctx).lit,
+            Some(0),
+            "lit on the empty value's row, the hint's"
+        );
+        suggest_frame(
+            &ctx,
+            &mut text,
+            vec![key_event(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+        );
+        suggest_frame(
+            &ctx,
+            &mut text,
+            vec![key_event(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+        );
+        assert_eq!(list(&ctx).lit, Some(2));
+        suggest_frame(
+            &ctx,
+            &mut text,
+            vec![key_event(egui::Key::Enter, egui::Modifiers::NONE)],
+        );
+        suggest_frame(&ctx, &mut text, vec![]);
+        assert_eq!(text, "sonnet", "Enter takes the lit row");
+        assert!(!list(&ctx).open, "and closes the list");
+
+        suggest_frame(
+            &ctx,
+            &mut text,
+            vec![key_event(egui::Key::ArrowDown, egui::Modifiers::ALT)],
+        );
+        assert!(list(&ctx).open);
+        suggest_frame(
+            &ctx,
+            &mut text,
+            vec![key_event(egui::Key::Escape, egui::Modifiers::NONE)],
+        );
+        suggest_frame(&ctx, &mut text, vec![]);
+        assert!(!list(&ctx).open, "Escape closes the list");
+        assert_eq!(text, "sonnet", "and keeps the text");
+        assert_eq!(ctx.memory(|m| m.focused()), field, "and the focus");
     }
 
     /// The filled lock and hexagon land centred on the point they are given, the

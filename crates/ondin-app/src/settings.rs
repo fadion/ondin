@@ -1535,8 +1535,8 @@ impl OndinApp {
             sub_heading(ui, "Instructions");
             ui.add_space(4.0);
             // Held at its rows, scrolling past them: the modal keeps its size.
-            let mut area = ui::TextArea::new("Added to every question, after Ondin's own", 3);
-            area.max_rows = 3;
+            let mut area = ui::TextArea::new("Added to every question, after Ondin's own", 4);
+            area.max_rows = 4;
             ui::text_area(ui, &mut a.instructions, area);
         });
     }

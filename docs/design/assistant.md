@@ -279,7 +279,7 @@ of it is a secret.
 - **Effort** — the harness's own levels; hidden where it has none.
 - **Access** — *Look*, *Propose*, *Edit*: the default for a new chat. Each cell's tooltip says
   what the level lets the agent do, in the panel's level menu's words.
-- **Instructions** — free text added to every system prompt (`ui::text_area`), held at its three
+- **Instructions** — free text added to every system prompt (`ui::text_area`), held at its four
   rows and scrolling past them, so the modal keeps its size.
 - The seal's sentence (§4) under the Agent row, for the choice on screen.
 

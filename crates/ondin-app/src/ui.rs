@@ -2373,10 +2373,13 @@ pub fn text_area(ui: &mut egui::Ui, text: &mut String, area: TextArea<'_>) -> eg
         )));
     }
     // Past `max_rows` the edit scrolls inside its ground; egui keeps the caret
-    // in view.
+    // in view. The cap is the scrolled height too: egui's own minimum (64)
+    // would hold a short cap taller once the text overflows it.
+    let cap = (area.max_rows as f32 * line + inset).max(rows_h);
     let scroller = egui::ScrollArea::vertical()
         .id_salt(area.id.unwrap_or_else(|| ui.next_auto_id()).with("rows"))
-        .max_height(area.max_rows as f32 * line + inset)
+        .max_height(cap)
+        .min_scrolled_height(cap)
         .auto_shrink([false, true])
         .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden);
     // Stretched over its rows' box, so a click anywhere in the box lands in
@@ -12269,6 +12272,38 @@ mod split_button_tests {
             "40 lines stop at {TEXT_AREA_MAX_ROWS} rows: {long} vs {cap}"
         );
         assert!(long > cap - row, "and fill them: {long} vs {cap}");
+    }
+
+    /// A field capped at its own rows, short of egui's 64pt scrolled minimum,
+    /// keeps its height once its text overflows the cap.
+    /// flip: `text_area` without `min_scrolled_height` → fails at "held".
+    #[test]
+    fn a_short_capped_text_area_holds_its_height_past_the_cap() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let height = |lines: usize| {
+            let mut text = vec!["line"; lines].join("\n");
+            let mut h = 0.0;
+            for _ in 0..3 {
+                let _ = ctx.run_ui(Default::default(), |ui| {
+                    let mut area = TextArea::new("hint", 3);
+                    area.max_rows = 3;
+                    area.id = Some(egui::Id::new(("capped", lines)));
+                    let top = ui.cursor().top();
+                    text_area(ui, &mut text, area);
+                    h = ui.cursor().top() - top;
+                });
+            }
+            h
+        };
+        let full = height(3);
+        assert!(
+            full < 64.0,
+            "the cap is under egui's minimum, or this pins nothing: {full}"
+        );
+        for lines in [4, 6, 12] {
+            assert_eq!(height(lines), full, "held at {lines} lines");
+        }
     }
 
     /// A laid-out line's height at the control size, as `text_area` measures it.

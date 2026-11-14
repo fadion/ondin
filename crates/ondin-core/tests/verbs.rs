@@ -20,7 +20,9 @@ fn blank() -> (Document, IdSource, NodeId) {
 }
 
 /// Run `name` with `args` on `doc` and commit its edit, with what the components owe
-/// it, as a script does; answers what it created.
+/// it, as a script does; answers what it created. Every call also undoes and redoes
+/// the edit as `History` does, and checks each lands on the document it should.
+/// flip: dropping the last op of a verb's inverse → fails at "undo restores".
 fn run(doc: &mut Document, ids: &mut IdSource, name: &str, args: Value) -> Vec<NodeId> {
     let res = Resolved::rebuild(doc);
     let Done {
@@ -38,9 +40,27 @@ fn run(doc: &mut Document, ids: &mut IdSource, name: &str, args: Value) -> Vec<N
     )
     .unwrap_or_else(|e| panic!("{name}: {e}"));
     ondin_core::propagate::owed(doc, &mut tx, ids);
-    doc.apply(&tx)
-        .unwrap_or_else(|e| panic!("{name} commits: {e}"));
+    round_trip(doc, &tx, name);
     created
+}
+
+/// Apply `tx` to `doc`, then its inverse and the inverse's, as undo and redo do,
+/// asserting each lands on the document before and after.
+fn round_trip(doc: &mut Document, tx: &Transaction, name: &str) {
+    let before = doc.clone();
+    let undo = doc
+        .apply(tx)
+        .unwrap_or_else(|e| panic!("{name} commits: {e}"))
+        .inverse;
+    let after = doc.clone();
+    let redo = doc
+        .apply_restoring(&undo)
+        .unwrap_or_else(|e| panic!("{name} undoes: {e}"))
+        .inverse;
+    assert!(*doc == before, "{name}: undo restores the document");
+    doc.apply_restoring(&redo)
+        .unwrap_or_else(|e| panic!("{name} redoes: {e}"));
+    assert!(*doc == after, "{name}: redo restores the edit");
 }
 
 /// What `name` with `args` answers on `doc`, committing nothing.
@@ -5723,4 +5743,398 @@ fn replace_font_rewrites_a_family_everywhere() {
         "to",
         "a family is not replaced by itself"
     );
+}
+
+/// Three 10 × 10 rectangles on the page at x 0, 30 and 100, bottom first.
+fn three_rects(doc: &mut Document, ids: &mut IdSource, page: NodeId) -> [NodeId; 3] {
+    [0.0, 30.0, 100.0].map(|x| {
+        run(
+            doc,
+            ids,
+            "create_node",
+            json!({ "parent": page.to_wire(), "kind": rect(10.0, 10.0), "x": x, "y": 0 }),
+        )[0]
+    })
+}
+
+fn kids(doc: &Document, id: NodeId) -> Vec<NodeId> {
+    doc.get(id).unwrap().children().to_vec()
+}
+
+/// `arrange` maps each word to its move, and a move that changes nothing, or a
+/// missing layer, is refused rather than answered as done.
+/// flip: `arrange` mapping `forward` to `ZMove::Front` → fails at "forward".
+#[test]
+fn arrange_moves_each_word_and_refuses_a_move_that_does_nothing() {
+    let (mut doc, mut ids, page) = blank();
+    let [a, b, c] = three_rects(&mut doc, &mut ids, page);
+    let mv = |doc: &mut Document, ids: &mut IdSource, id: NodeId, word: &str| {
+        run(
+            doc,
+            ids,
+            "arrange",
+            json!({ "nodes": [id.to_wire()], "move": word }),
+        );
+    };
+    mv(&mut doc, &mut ids, a, "forward");
+    assert_eq!(kids(&doc, page), [b, a, c], "forward");
+    mv(&mut doc, &mut ids, a, "front");
+    assert_eq!(kids(&doc, page), [b, c, a], "front");
+    mv(&mut doc, &mut ids, a, "backward");
+    assert_eq!(kids(&doc, page), [b, a, c], "backward");
+    mv(&mut doc, &mut ids, c, "back");
+    assert_eq!(kids(&doc, page), [c, b, a], "back");
+    let top = answer(
+        &doc,
+        &mut ids,
+        "arrange",
+        json!({ "nodes": [a.to_wire()], "move": "front" }),
+    );
+    assert!(
+        matches!(top, Err(VerbError::Nothing(_))),
+        "already at the front: {top:?}"
+    );
+    let missing = json!({ "nodes": ["7e5b:999"], "move": "front" });
+    assert!(
+        answer(&doc, &mut ids, "arrange", missing).is_err(),
+        "a missing layer"
+    );
+}
+
+/// `reorder` puts a layer at the index given among its siblings.
+#[test]
+fn reorder_moves_a_layer_to_its_index() {
+    let (mut doc, mut ids, page) = blank();
+    let [a, b, c] = three_rects(&mut doc, &mut ids, page);
+    run(
+        &mut doc,
+        &mut ids,
+        "reorder",
+        json!({ "node": c.to_wire(), "index": 0 }),
+    );
+    assert_eq!(kids(&doc, page), [c, a, b]);
+}
+
+/// `reparent` into a layer's own parent with no index puts it on top, as its doc
+/// says; a page is the parent here.
+/// flip: `reparent` counting the moving layer among its parent's children → fails at the commit.
+#[test]
+fn reparent_into_its_own_parent_puts_it_on_top() {
+    let (mut doc, mut ids, page) = blank();
+    let [a, b, c] = three_rects(&mut doc, &mut ids, page);
+    run(
+        &mut doc,
+        &mut ids,
+        "reparent",
+        json!({ "node": a.to_wire(), "parent": page.to_wire() }),
+    );
+    assert_eq!(kids(&doc, page), [b, c, a]);
+    let at_count = json!({ "node": b.to_wire(), "parent": page.to_wire(), "index": 3 });
+    run(&mut doc, &mut ids, "reparent", at_count);
+    assert_eq!(kids(&doc, page), [c, a, b]);
+}
+
+/// `distribute` spaces three layers evenly along each axis, and refuses two.
+/// flip: `distribute` mapping `horizontal` to `Axis::Y` → the first call is refused,
+/// the three sharing one top.
+#[test]
+fn distribute_spaces_three_layers_and_refuses_two() {
+    let (mut doc, mut ids, page) = blank();
+    let [a, b, c] = three_rects(&mut doc, &mut ids, page);
+    let nodes = json!([a.to_wire(), b.to_wire(), c.to_wire()]);
+    run(
+        &mut doc,
+        &mut ids,
+        "distribute",
+        json!({ "nodes": nodes, "axis": "horizontal" }),
+    );
+    let res = Resolved::rebuild(&doc);
+    assert_eq!(res.world_bounds(b).unwrap().x0, 50.0, "evenly across");
+    let again = answer(
+        &doc,
+        &mut ids,
+        "distribute",
+        json!({ "nodes": nodes, "axis": "horizontal" }),
+    );
+    assert!(
+        matches!(again, Err(VerbError::Nothing(_))),
+        "already even: {again:?}"
+    );
+    let two = json!({ "nodes": [a.to_wire(), b.to_wire()], "axis": "vertical" });
+    let two = answer(&doc, &mut ids, "distribute", two);
+    assert!(
+        matches!(two, Err(VerbError::Nothing(_))),
+        "two layers: {two:?}"
+    );
+}
+
+/// `ungroup` lifts a group's children into its parent where they are drawn, and
+/// `flatten` bakes layers into one path.
+/// flip: `ungroup` not keeping world placement → fails at "where it was drawn".
+#[test]
+fn ungroup_keeps_where_layers_are_drawn_and_flatten_makes_a_path() {
+    let (mut doc, mut ids, page) = blank();
+    let [a, b, _] = three_rects(&mut doc, &mut ids, page);
+    let g = run(
+        &mut doc,
+        &mut ids,
+        "group",
+        json!({ "nodes": [a.to_wire(), b.to_wire()] }),
+    )[0];
+    run(
+        &mut doc,
+        &mut ids,
+        "set_transform",
+        json!({ "node": g.to_wire(), "transform": [1, 0, 0, 1, 7, 9] }),
+    );
+    let drawn = Resolved::rebuild(&doc).world_bounds(b).unwrap();
+    run(
+        &mut doc,
+        &mut ids,
+        "ungroup",
+        json!({ "nodes": [g.to_wire()] }),
+    );
+    assert!(doc.get(g).is_none(), "the group went");
+    assert_eq!(doc.get(b).unwrap().parent(), Some(page));
+    assert_eq!(
+        Resolved::rebuild(&doc).world_bounds(b).unwrap(),
+        drawn,
+        "where it was drawn"
+    );
+    let p = run(
+        &mut doc,
+        &mut ids,
+        "flatten",
+        json!({ "nodes": [a.to_wire(), b.to_wire()] }),
+    )[0];
+    assert!(
+        matches!(doc.get(p).unwrap().kind(), NodeKind::Path { .. }),
+        "a path"
+    );
+}
+
+/// `delete_node`, `reset_overrides` and `frame` refuse what would write nothing
+/// or name a missing layer, rather than answer as done or blame something else.
+/// flip: `delete_node` answering `build::delete`'s empty edit as done → fails at "a missing layer".
+#[test]
+fn verbs_that_would_write_nothing_are_refused() {
+    let (mut doc, mut ids, page) = blank();
+    let [a, ..] = three_rects(&mut doc, &mut ids, page);
+    let gone = answer(
+        &doc,
+        &mut ids,
+        "delete_node",
+        json!({ "nodes": ["7e5b:999"] }),
+    );
+    assert!(gone.is_err(), "a missing layer: {gone:?}");
+    let frame = answer(
+        &doc,
+        &mut ids,
+        "frame",
+        json!({ "nodes": [a.to_wire(), "7e5b:999"] }),
+    );
+    let said = format!("{frame:?}");
+    assert!(
+        frame.is_err() && !said.contains("boolean"),
+        "a missing member: {said}"
+    );
+    let (main, _) = main_component(&mut doc, &mut ids, page, "Card", 40.0);
+    let inst = run(
+        &mut doc,
+        &mut ids,
+        "create_instance",
+        json!({ "main": main.to_wire(), "parent": page.to_wire() }),
+    )[0];
+    let reset = answer(
+        &doc,
+        &mut ids,
+        "reset_overrides",
+        json!({ "nodes": [inst.to_wire()] }),
+    );
+    assert!(
+        matches!(reset, Err(VerbError::Nothing(_))),
+        "no overrides: {reset:?}"
+    );
+}
+
+/// `set_mask` on a flex child writes it where it is drawn first, so it does not
+/// jump to its stored transform when it leaves the flow.
+/// flip: `set_mask` skipping `build::baked` → fails at "stays where it is drawn".
+#[test]
+fn set_mask_on_a_layout_child_keeps_where_it_is_drawn() {
+    let (mut doc, mut ids, page) = blank();
+    let f = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": page.to_wire(), "kind": frame(200.0, 100.0) }),
+    )[0];
+    let made: Vec<NodeId> = (0..3)
+        .map(|_| {
+            run(
+                &mut doc,
+                &mut ids,
+                "create_node",
+                json!({ "parent": f.to_wire(), "kind": rect(40.0, 40.0) }),
+            )[0]
+        })
+        .collect();
+    run(
+        &mut doc,
+        &mut ids,
+        "set_display",
+        json!({ "nodes": [f.to_wire()], "display": { "Flex": { "gap": 20, "padding": 10 } } }),
+    );
+    let mid = made[1];
+    let drawn = Resolved::rebuild(&doc).world_bounds(mid).unwrap();
+    assert_eq!(drawn.x0, 70.0, "the fixture: laid out by the flex");
+    run(
+        &mut doc,
+        &mut ids,
+        "set_mask",
+        json!({ "nodes": [mid.to_wire()], "mask": true }),
+    );
+    assert!(doc.get(mid).unwrap().mask());
+    assert_eq!(
+        Resolved::rebuild(&doc).world_bounds(mid).unwrap(),
+        drawn,
+        "stays where it is drawn"
+    );
+}
+
+/// `replace_text` with no `nodes` leaves a draft page alone, the first one too.
+/// flip: `replace_text` searching from `first_page` → fails at "the draft".
+#[test]
+fn replace_text_skips_draft_pages() {
+    let (mut doc, mut ids, draft) = blank();
+    let other = run(&mut doc, &mut ids, "add_page", json!({ "name": "Other" }))[0];
+    run(
+        &mut doc,
+        &mut ids,
+        "set_page_draft",
+        json!({ "page": draft.to_wire(), "draft": true }),
+    );
+    let text = |doc: &mut Document, ids: &mut IdSource, page: NodeId| {
+        run(
+            doc,
+            ids,
+            "create_text",
+            json!({ "parent": page.to_wire(), "text": "Foo" }),
+        )[0]
+    };
+    let (in_draft, shown) = (
+        text(&mut doc, &mut ids, draft),
+        text(&mut doc, &mut ids, other),
+    );
+    run(
+        &mut doc,
+        &mut ids,
+        "replace_text",
+        json!({ "find": "Foo", "replace": "Bar" }),
+    );
+    let content = |id| match doc.get(id).unwrap().kind() {
+        NodeKind::Text { content, .. } => content.clone(),
+        _ => unreachable!(),
+    };
+    assert_eq!(content(shown), "Bar");
+    assert_eq!(content(in_draft), "Foo", "the draft");
+}
+
+/// Runs given to `set_text_style` and `set_text_spans` count characters, as the
+/// snapshot reads them, and are kept as the byte ranges the model holds.
+/// flip: `spans_in_bytes` keeping the numbers as bytes → fails at "set_text_style".
+#[test]
+fn text_runs_are_counted_in_characters() {
+    let (mut doc, mut ids, page) = blank();
+    let t = run(
+        &mut doc,
+        &mut ids,
+        "create_text",
+        json!({ "parent": page.to_wire(), "text": "Café ok" }),
+    )[0];
+    let bold = json!([{ "start": 5, "end": 7, "attr": { "Weight": 700 } }]);
+    let ranges = |doc: &Document| match doc.get(t).unwrap().kind() {
+        NodeKind::Text { spans, .. } => spans
+            .as_slice()
+            .iter()
+            .map(|s| (s.start, s.end))
+            .collect::<Vec<_>>(),
+        _ => unreachable!(),
+    };
+    run(
+        &mut doc,
+        &mut ids,
+        "set_text_style",
+        json!({ "nodes": [t.to_wire()], "style": {}, "spans": bold }),
+    );
+    assert_eq!(ranges(&doc), [(6, 8)], "set_text_style");
+    run(
+        &mut doc,
+        &mut ids,
+        "set_text_spans",
+        json!({ "node": t.to_wire(), "spans": [] }),
+    );
+    assert!(ranges(&doc).is_empty());
+    run(
+        &mut doc,
+        &mut ids,
+        "set_text_spans",
+        json!({ "node": t.to_wire(), "spans": bold }),
+    );
+    assert_eq!(ranges(&doc), [(6, 8)], "set_text_spans");
+    let past = json!([{ "start": 5, "end": 8, "attr": { "Weight": 700 } }]);
+    assert_eq!(
+        refused_param(
+            &doc,
+            &mut ids,
+            "set_text_spans",
+            json!({ "node": t.to_wire(), "spans": past })
+        ),
+        "spans"
+    );
+}
+
+/// `fill_content` writes a text layer named for a kind of content with one.
+#[test]
+fn fill_content_fills_a_named_text() {
+    let (mut doc, mut ids, page) = blank();
+    let t = run(
+        &mut doc,
+        &mut ids,
+        "create_text",
+        json!({ "parent": page.to_wire(), "text": "Placeholder" }),
+    )[0];
+    run(
+        &mut doc,
+        &mut ids,
+        "set_name",
+        json!({ "node": t.to_wire(), "name": "Full name" }),
+    );
+    run(
+        &mut doc,
+        &mut ids,
+        "fill_content",
+        json!({ "nodes": [t.to_wire()], "seed": 3 }),
+    );
+    let NodeKind::Text { content, .. } = doc.get(t).unwrap().kind() else {
+        unreachable!()
+    };
+    assert!(!content.is_empty() && content != "Placeholder", "{content}");
+}
+
+/// `import_svg` says what it approximated, as the app's import does.
+/// flip: `import_svg` building `said` from `skipped` alone → fails at "approximated".
+#[test]
+fn import_svg_says_what_it_approximated() {
+    let (doc, mut ids, page) = blank();
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><defs><symbol id="s" viewBox="0 0 10 10"><rect width="10" height="10"/></symbol></defs><use href="#s" width="20" height="20"/></svg>"##;
+    let done = answer(
+        &doc,
+        &mut ids,
+        "import_svg",
+        json!({ "parent": page.to_wire(), "svg": svg }),
+    )
+    .unwrap();
+    let said = done.said.unwrap_or_default();
+    assert!(said.contains("Approximated"), "approximated: {said}");
 }

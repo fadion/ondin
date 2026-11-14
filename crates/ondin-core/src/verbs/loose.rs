@@ -9,14 +9,16 @@
 //! [`TextStyle::default`](crate::TextStyle) has, and its `sizing` is `Auto` unless
 //! given; a star's points and inner ratio are 5 and 0.382 unless given.
 //!
-//! What `get_node` and CSS write is taken too: a length as `"22px"`, `"1.2em"` or
-//! `"auto"`; a sizing as `{"type": "AutoHeight", "width": w}`; a fill as
+//! What `get_node` and CSS write is taken too: a length as `"22px"`, `"1.2em"`,
+//! `"120%"` or `"auto"`; a sizing as `{"type": "AutoHeight", "width": w}`; a fill as
 //! `{"paint": {"type": "Solid", "color", "alpha"}}`; an effect flat, its kind
 //! `DropShadow` or `drop_shadow`, its `opacity` folded into its colour, shown
-//! unless it says not; a rectangle's corners left out (square) or as one number;
+//! unless it says not, its blend by its label (`"Color burn"`); a rectangle's
+//! corners left out (square) or as one number;
 //! padding as one, two, three or four numbers and `gap` for both gaps; a path as
 //! SVG path data, a `geometry` as path data alone; a line's end as `[x, y]`; a
-//! bound corner by its name.
+//! bound corner by its name. An opacity or alpha outside 0–1, or a sizing without
+//! a dimension its type has, is refused ([`loosen_strict`]), never read as a value.
 //!
 //! [`tighten`] writes the short forms only where [`loosen`] gives back the same
 //! value, so a tree read and written back is the tree it was, with one exception:
@@ -81,14 +83,36 @@ fn nearest_hex(components: &[Value]) -> Option<String> {
     })
 }
 
-/// A colour as [`nearest_hex`] writes it.
-fn nearest_hex_of(c: peniko::Color) -> String {
+/// A colour as [`nearest_hex`] writes it, `None` outside sRGB's 0–1.
+fn nearest_hex_of(c: peniko::Color) -> Option<String> {
     let components: Vec<Value> = c
         .components
         .iter()
         .map(|&f| Value::from(f64::from(f)))
         .collect();
-    nearest_hex(&components).unwrap_or_else(|| "#000000".into())
+    nearest_hex(&components)
+}
+
+/// `o`, an opacity or alpha written as `key`, when it is from 0 to 1; else why not,
+/// noted in `errs`.
+fn unit(key: &str, o: &Value, errs: &mut Vec<String>) -> Option<f32> {
+    match o.as_f64() {
+        Some(f) if (0.0..=1.0).contains(&f) => Some(f as f32),
+        Some(f) => {
+            errs.push(match f > 1.0 && f <= 100.0 {
+                true => format!(
+                    "`{key}` is from 0 to 1, not {f}; write {} for {f}%",
+                    f / 100.0
+                ),
+                false => format!("`{key}` is from 0 to 1, not {f}"),
+            });
+            None
+        }
+        None => {
+            errs.push(format!("`{key}` is a number from 0 to 1"));
+            None
+        }
+    }
 }
 
 /// The keys whose value is a [`Length`](crate::Length), as fields and as
@@ -114,20 +138,26 @@ const LENGTH_KEYS: [&str; 18] = [
     "IndentEnd",
 ];
 
-/// A length written as CSS writes it: `"22px"`, `"1.2em"`, or `"auto"` for no
-/// line height of its own.
+/// A length written as CSS writes it: `"22px"`, `"1.2em"`, `"120%"` (as `get_node`
+/// writes a line height; a hundredth of an em), or `"auto"` for no line height of
+/// its own.
 fn css_length(s: &str) -> Option<Value> {
     let s = s.trim();
     if s == "auto" {
         return Some(Value::Null);
     }
-    let (n, unit) = match (s.strip_suffix("px"), s.strip_suffix("em")) {
-        (Some(n), _) => (n, "Px"),
-        (_, Some(n)) => (n, "Em"),
+    let (n, unit, per) = match (
+        s.strip_suffix("px"),
+        s.strip_suffix("em"),
+        s.strip_suffix('%'),
+    ) {
+        (Some(n), _, _) => (n, "Px", 1.0),
+        (_, Some(n), _) => (n, "Em", 1.0),
+        (_, _, Some(n)) => (n, "Em", 100.0),
         _ => return None,
     };
     let n: f64 = n.trim().parse().ok().filter(|n: &f64| n.is_finite())?;
-    Some(serde_json::json!({ unit: n }))
+    Some(serde_json::json!({ unit: n / per }))
 }
 
 /// The four corners a radius written as one number, or left out of a rectangle,
@@ -160,14 +190,23 @@ pub(crate) fn snake(name: &str) -> String {
 }
 
 /// A text's sizing as `get_node` writes it, `{"type": "AutoHeight", "width": w}`,
-/// in the model's shape.
-fn loosen_sizing(v: &mut Value) {
+/// in the model's shape; one missing a dimension its type has is noted in `errs`.
+fn loosen_sizing(v: &mut Value, errs: &mut Vec<String>) {
     let Value::Object(map) = v else {
         return;
     };
     let Some(kind) = map.get("type").and_then(Value::as_str) else {
         return;
     };
+    let needs: &[&str] = match kind {
+        "AutoHeight" => &["width"],
+        "Fixed" => &["width", "height"],
+        _ => &[],
+    };
+    if let Some(k) = needs.iter().find(|k| !map.contains_key(**k)) {
+        errs.push(format!("a `{kind}` sizing needs its `{k}`"));
+        return;
+    }
     let n = |k: &str| map.get(k).cloned().unwrap_or(Value::from(0.0));
     *v = match kind {
         "Auto" => Value::from("Auto"),
@@ -177,10 +216,19 @@ fn loosen_sizing(v: &mut Value) {
     };
 }
 
+/// A colour written as hex or in the model's own shape.
+fn any_colour(v: &Value) -> Option<peniko::Color> {
+    match v {
+        Value::String(s) => hex_colour(s),
+        _ => serde_json::from_value(v.clone()).ok(),
+    }
+}
+
 /// An effect written flat, as `get_node` does (`{"kind": "DropShadow", "blur": …,
 /// "opacity": …}`), or as its kind alone, or without `visible`: in the model's
-/// shape, the opacity folded into the colour's alpha.
-fn loosen_effect(item: &mut Value) {
+/// shape, the opacity folded into the colour's alpha. An opacity that cannot be
+/// folded stays, for the read to refuse; one outside 0–1 is noted in `errs`.
+fn loosen_effect(item: &mut Value, errs: &mut Vec<String>) {
     let Value::Object(map) = item else {
         return;
     };
@@ -194,15 +242,17 @@ fn loosen_effect(item: &mut Value) {
     if let Some(kind) = flat_kind {
         let visible = map.remove("visible").unwrap_or(Value::Bool(true));
         map.remove("kind");
-        let opacity = map.remove("opacity").and_then(|o| o.as_f64());
         let mut inner = std::mem::take(map);
         inner.insert("type".into(), Value::String(kind));
-        if let (Some(o), Some(Value::String(s))) = (opacity, inner.get("color"))
-            && let Some(c) = hex_colour(s)
+        if let Some(o) = inner.get("opacity")
+            && let Some(o) = unit("opacity", o, errs)
+            && let Some(c) = inner.get("color").and_then(any_colour)
         {
-            let c = c.multiply_alpha(o as f32);
+            let c = c.multiply_alpha(o);
             inner.insert("color".into(), serde_json::to_value(c).unwrap_or_default());
+            inner.remove("opacity");
         }
+        blend_by_label(&mut inner);
         map.insert("kind".into(), Value::Object(inner));
         map.insert("visible".into(), visible);
     } else if let Some(Value::Object(kind)) = map.get_mut("kind") {
@@ -210,7 +260,24 @@ fn loosen_effect(item: &mut Value) {
             let t = snake(t);
             kind.insert("type".into(), Value::String(t));
         }
+        blend_by_label(kind);
         map.entry("visible").or_insert(Value::Bool(true));
+    }
+}
+
+/// An effect's `blend` written by the label `get_node` writes ("Color burn"), as
+/// the model's variant: inside the internally tagged effect, `settle` cannot
+/// reach the word to put it right.
+fn blend_by_label(effect: &mut Map<String, Value>) {
+    if let Some(Value::String(s)) = effect.get("blend")
+        && let Some(mode) = crate::node::BlendMode::ALL
+            .into_iter()
+            .find(|m| m.label() == s.as_str())
+    {
+        effect.insert(
+            "blend".into(),
+            serde_json::to_value(mode).unwrap_or_default(),
+        );
     }
 }
 
@@ -232,6 +299,22 @@ fn loosen_path(map: &mut Map<String, Value>) {
 /// Expand the short forms in `v`, the value of a parameter or field called `key`,
 /// into the model's shapes. What is not a short form is left as it is.
 pub(crate) fn loosen(key: &str, v: &mut Value) {
+    loosen_in(key, v, &mut Vec::new());
+}
+
+/// [`loosen`], refused with the first short form written wrong: an opacity
+/// outside 0–1, a sizing without a dimension its type has.
+pub(crate) fn loosen_strict(key: &str, v: &mut Value) -> Result<(), String> {
+    let mut errs = Vec::new();
+    loosen_in(key, v, &mut errs);
+    match errs.into_iter().next() {
+        None => Ok(()),
+        Some(why) => Err(why),
+    }
+}
+
+/// [`loosen`], noting in `errs` what it could not expand because it was wrong.
+fn loosen_in(key: &str, v: &mut Value, errs: &mut Vec<String>) {
     if let Value::String(s) = v
         && LENGTH_KEYS.contains(&key)
         && let Some(length) = css_length(s)
@@ -239,7 +322,7 @@ pub(crate) fn loosen(key: &str, v: &mut Value) {
         *v = length;
     }
     match (key, &mut *v) {
-        ("sizing", _) => loosen_sizing(v),
+        ("sizing", _) => loosen_sizing(v, errs),
         ("padding", Value::Number(n)) => {
             let n = n.clone();
             *v = Value::Array(vec![Value::Number(n); 4]);
@@ -298,12 +381,12 @@ pub(crate) fn loosen(key: &str, v: &mut Value) {
         Value::Array(items) => {
             for item in items.iter_mut() {
                 match key {
-                    "fills" => loosen_paint(item, false),
-                    "strokes" => loosen_paint(item, true),
-                    "effects" => loosen_effect(item),
+                    "fills" => loosen_paint(item, false, errs),
+                    "strokes" => loosen_paint(item, true, errs),
+                    "effects" => loosen_effect(item, errs),
                     _ => {}
                 }
-                loosen("", item);
+                loosen_in("", item, errs);
             }
         }
         Value::Object(map) => {
@@ -318,7 +401,7 @@ pub(crate) fn loosen(key: &str, v: &mut Value) {
                 map.insert("color".into(), serde_json::to_value(c).unwrap_or_default());
             }
             for (k, child) in map.iter_mut() {
-                loosen(k, child);
+                loosen_in(k, child, errs);
             }
             if key == "Text" {
                 loosen_text_style(map);
@@ -330,8 +413,8 @@ pub(crate) fn loosen(key: &str, v: &mut Value) {
 }
 
 /// A fill or stroke written short: a bare colour, a colour as its `brush`, or
-/// without the fields a new one has.
-fn loosen_paint(item: &mut Value, stroke: bool) {
+/// without the fields a new one has. An opacity outside 0–1 is noted in `errs`.
+fn loosen_paint(item: &mut Value, stroke: bool, errs: &mut Vec<String>) {
     if let Value::String(s) = item {
         let brush = std::mem::take(s);
         *item = serde_json::json!({ "brush": brush });
@@ -351,9 +434,10 @@ fn loosen_paint(item: &mut Value, stroke: bool) {
     }
     if let Some(Value::String(s)) = map.get("brush")
         && let Some(c) = hex_colour(s)
-        && let Some(o) = map.get("opacity").and_then(Value::as_f64)
+        && let Some(o) = map.get("opacity")
+        && let Some(o) = unit("opacity", o, errs)
+        && let Some(c) = nearest_hex_of(c.multiply_alpha(o))
     {
-        let c = nearest_hex_of(c.multiply_alpha(o as f32));
         map.remove("opacity");
         map.insert("brush".into(), Value::String(c));
     }
@@ -363,9 +447,12 @@ fn loosen_paint(item: &mut Value, stroke: bool) {
             .get("color")
             .and_then(Value::as_str)
             .and_then(hex_colour)
+        && let Some(alpha) = match paint.get("alpha") {
+            Some(a) => unit("alpha", a, errs),
+            None => Some(1.0),
+        }
     {
-        let alpha = paint.get("alpha").and_then(Value::as_f64).unwrap_or(1.0);
-        let c = c.multiply_alpha(alpha as f32);
+        let c = c.multiply_alpha(alpha);
         map.remove("paint");
         let mut solid = Map::new();
         solid.insert("Solid".into(), serde_json::to_value(c).unwrap_or_default());

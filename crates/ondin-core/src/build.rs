@@ -8963,6 +8963,20 @@ pub fn is_flex_item(doc: &Document, id: NodeId) -> bool {
     crate::container::parent_lays_out(&view, id) && crate::container::in_flow(&view, id)
 }
 
+/// Why `id` cannot be moved: its container lays it out, so the commit door would
+/// drop the move (`kept_flow_translations`) and the call read as done. `None`
+/// for a layer with a place of its own. Every door that moves a layer asks.
+pub fn laid_out_refusal(doc: &Document, id: NodeId) -> Option<String> {
+    is_flex_item(doc, id).then(|| {
+        format!(
+            "`{}` is placed by its container's layout, so a move cannot place it: reorder it \
+             with `reorder`, or pin it to the frame's sides with `set_insets`, which takes it \
+             out of the layout",
+            id.to_wire()
+        )
+    })
+}
+
 /// `p`'s main- and cross-axis coordinates under `direction`.
 fn main_cross(direction: crate::container::FlexDirection, p: Point) -> (f64, f64) {
     if direction.is_row() {

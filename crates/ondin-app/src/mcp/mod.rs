@@ -1706,19 +1706,13 @@ fn set(
         ["x", "y"],
         "`at` is [x, y], the left and top of the layer's box in its parent",
     )?;
-    // A layer its container lays out has no place of its own to set; the move
-    // would be dropped and the call read as done.
+    // A layer its container lays out has no place of its own to set.
     if at.is_some()
-        && let Some(id) = ids
+        && let Some(why) = ids
             .iter()
-            .find(|id| ondin_core::build::is_flex_item(&s.doc, **id))
+            .find_map(|id| ondin_core::build::laid_out_refusal(&s.doc, *id))
     {
-        return Err(format!(
-            "`{}` is placed by its container's layout, so `at`, `x` and `y` cannot move it: \
-             reorder it with `reorder`, or pin it to the frame's sides with `set_insets`, \
-             which takes it out of the layout",
-            id.to_wire()
-        ));
+        return Err(format!("`at`: {why}"));
     }
     let rotation = match props.get("rotation") {
         None => None,
@@ -2561,11 +2555,13 @@ mod tests {
         assert!((b.y - a.y).abs() < 1e-6 && b.x > a.x, "flat: {a:?} → {b:?}");
     }
 
-    /// `set`'s `at` on a layer its container lays out is refused, naming the
-    /// layout, rather than dropped and answered as done; new fills through a
+    /// `set`'s `at`, and `set_transform` by name or through `call`, on a layer
+    /// its container lays out is refused, naming the layout, rather than dropped
+    /// and answered as done; new fills through a
     /// group clear the colour of the texts inside it.
     ///
-    /// flip: `set` without its flex-item refusal → fails at "refused";
+    /// flip: `set` without its flex-item refusal → fails at "refused"; the
+    /// `set_transform` verb without its → fails at "set_transform refused";
     /// clearing over `ids` alone → fails at "the nested text's colour".
     #[test]
     fn set_refuses_a_laid_out_place_and_clears_nested_text_colour() {
@@ -2604,6 +2600,12 @@ mod tests {
             json!({ "nodes": [item], "props": { "x": 50 } }),
         );
         assert!(out.is_error, "refused");
+        // The verb itself refuses the move, so every door does.
+        let moved = json!({ "node": item, "transform": [1, 0, 0, 1, 50, 0] });
+        let out = call(&mut engine, &mut docs, 1, "set_transform", moved.clone());
+        assert!(out.is_error, "set_transform refused");
+        let call_args = json!({ "tool": "set_transform", "args": moved });
+        assert!(call(&mut engine, &mut docs, 1, "call", call_args).is_error);
 
         let text = call(
             &mut engine,

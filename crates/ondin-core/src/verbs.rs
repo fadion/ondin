@@ -4277,10 +4277,16 @@ pub static VERBS: &[Verb] = &[
             ),
         ],
         run: |ctx, a| {
-            Ok(Done::ops(vec![Operation::SetTransform {
-                id: a.layer(ctx.doc, "node")?,
-                transform: a.model("transform")?,
-            }]))
+            let id = a.layer(ctx.doc, "node")?;
+            let transform: Affine = a.model("transform")?;
+            // Its turn and scale land; a move of a laid-out layer would not.
+            let was = node(ctx, id)?.transform().translation();
+            if transform.translation() != was
+                && let Some(why) = build::laid_out_refusal(ctx.doc, id)
+            {
+                return Err(a.invalid("transform", why));
+            }
+            Ok(Done::ops(vec![Operation::SetTransform { id, transform }]))
         },
     },
     Verb {

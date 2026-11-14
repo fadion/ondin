@@ -467,6 +467,11 @@ impl Setup {
                 let cfg = folder.join("mcp.json");
                 write(&cfg, harness::claude_mcp_config_json(&exe, args))?;
                 s.base.mcp_config = Some(path_str(&cfg));
+                if !config.system_prompt.trim().is_empty() {
+                    let sys = folder.join("system-prompt.md");
+                    write(&sys, config.system_prompt.clone())?;
+                    s.base.system_file = Some(path_str(&sys));
+                }
             }
             Harness::Codex => {
                 mkdir(&work)?;

@@ -344,6 +344,9 @@ pub(crate) struct ClaudeFlags {
     pub tools: bool,
     pub setting_sources: bool,
     pub strict_mcp_config: bool,
+    /// `--append-system-prompt-file`, which keeps the system prompt (and the
+    /// conversation it replays) off the length-limited, world-readable argv.
+    pub system_prompt_file: bool,
 }
 
 impl ClaudeFlags {
@@ -353,6 +356,7 @@ impl ClaudeFlags {
         tools: true,
         setting_sources: true,
         strict_mcp_config: true,
+        system_prompt_file: true,
     };
 }
 
@@ -383,6 +387,9 @@ impl Probe {
                     tools: mentions_flag(&both, "--tools"),
                     setting_sources: mentions_flag(&both, "--setting-sources"),
                     strict_mcp_config: mentions_flag(&both, "--strict-mcp-config"),
+                    // Listed only inside another flag's text, as `[-file]`.
+                    system_prompt_file: both.contains("--append-system-prompt[-file]")
+                        || mentions_flag(&both, "--append-system-prompt-file"),
                 },
                 false => ClaudeFlags::ALL,
             },
@@ -527,6 +534,8 @@ pub(crate) struct TurnSpec {
     pub effort: String,
     /// The conversation to continue, from the previous turn's stream.
     pub resume: Option<String>,
+    /// `system`, written to a file in the run folder for Claude Code.
+    pub system_file: Option<String>,
     /// The file the harness reads Ondin's server from: Claude's `--mcp-config`,
     /// Copilot's `--additional-mcp-config`, DeepSeek's `--patch` overlay.
     pub mcp_config: Option<String>,
@@ -619,8 +628,14 @@ pub(crate) fn session_args(h: Harness, spec: &TurnSpec, flags: ClaudeFlags) -> V
             if let Some(id) = resume {
                 a.extend(["--resume".into(), id.into()]);
             }
-            if !spec.system.trim().is_empty() {
-                a.extend(["--append-system-prompt".into(), spec.system.clone()]);
+            match spec.system_file.as_deref() {
+                Some(file) if flags.system_prompt_file => {
+                    a.extend(["--append-system-prompt-file".into(), file.into()]);
+                }
+                _ if !spec.system.trim().is_empty() => {
+                    a.extend(["--append-system-prompt".into(), spec.system.clone()]);
+                }
+                _ => {}
             }
             if let Some(cfg) = spec.mcp_config.as_deref() {
                 a.extend(["--mcp-config".into(), cfg.into()]);
@@ -1374,6 +1389,7 @@ mod tests {
   --setting-sources <sources>           Comma-separated list of setting sources
   --strict-mcp-config                   Only use MCP servers from --mcp-config,
   --tools <tools...>                    Specify the list of available tools from
+                                        --append-system-prompt[-file], --add-dir
   -h, --help                            Display help for command";
 
     /// Claude's grade turns on `--tools`, and an unreadable probe is `Unknown`
@@ -1444,6 +1460,29 @@ mod tests {
         for never in ["--dangerously-skip-permissions", "bypassPermissions"] {
             assert!(!a.iter().any(|x| x == never));
         }
+    }
+
+    /// A build that reads the system prompt from a file gets the file, and the
+    /// prompt's text is nowhere on its command line; an older build gets the text.
+    /// flip: `session_args` ignoring `system_file` → fails at the first `!any`.
+    #[test]
+    fn claude_takes_its_system_prompt_from_a_file_where_it_can() {
+        let mut s = spec();
+        s.system_file = Some("sys.md".into());
+        let flags = Probe::read(Harness::Claude, true, CLAUDE_HELP, "").claude;
+        assert!(flags.system_prompt_file);
+        let a = session_args(Harness::Claude, &s, flags);
+        assert!(!a.iter().any(|x| x.contains(&s.system)));
+        let at = a
+            .iter()
+            .position(|x| x == "--append-system-prompt-file")
+            .unwrap();
+        assert_eq!(a[at + 1], "sys.md");
+        let help = "  --append-system-prompt <prompt>\n  -h, --help";
+        let old = Probe::read(Harness::Claude, true, help, "").claude;
+        assert!(!old.system_prompt_file);
+        let a = session_args(Harness::Claude, &s, old);
+        assert!(a.contains(&s.system));
     }
 
     /// A resumed Codex turn has no `--sandbox` (absent from `exec resume`), the

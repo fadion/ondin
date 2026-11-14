@@ -155,11 +155,29 @@ pub enum SizeGround {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SizePreviewPrefs {
-    /// The tile sizes, smallest first, from `size_preview::SIZE_CHOICES`.
+    /// The tile sizes, smallest first, from `size_preview::SIZE_CHOICES`; a
+    /// hand-edited size outside them is dropped on read, since one past a
+    /// texture's limit would fail the preview at every launch.
+    #[serde(deserialize_with = "choice_sizes")]
     pub sizes: Vec<u32>,
     pub ground: SizeGround,
     /// Each tile exactly N pixels, as a 1× screen gets it.
     pub pixels: bool,
+}
+
+/// The stored sizes kept to the choices, sorted and once each; none left reads
+/// as the default set.
+fn choice_sizes<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<u32>, D::Error> {
+    let mut sizes: Vec<u32> = Vec::<u32>::deserialize(d)?
+        .into_iter()
+        .filter(|s| crate::size_preview::SIZE_CHOICES.contains(s))
+        .collect();
+    sizes.sort_unstable();
+    sizes.dedup();
+    if sizes.is_empty() {
+        sizes = SizePreviewPrefs::default().sizes;
+    }
+    Ok(sizes)
 }
 
 impl Default for SizePreviewPrefs {
@@ -995,5 +1013,26 @@ mod tests {
             "a first run still records what it did"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Hand-edited size-preview sizes are kept to the choices on read: a size
+    /// past a texture's limit, a zero and a repeat go, and none left reads as
+    /// the default set.
+    /// flip: `sizes` without `choice_sizes` → fails at the kept sizes.
+    #[test]
+    fn size_preview_sizes_are_kept_to_the_choices() {
+        let read = |sizes: serde_json::Value| -> Vec<u32> {
+            serde_json::from_value::<SizePreviewPrefs>(serde_json::json!({ "sizes": sizes }))
+                .unwrap()
+                .sizes
+        };
+        assert_eq!(
+            read(serde_json::json!([65536, 24, 0, 16, 24])),
+            vec![16, 24]
+        );
+        assert_eq!(
+            read(serde_json::json!([99999])),
+            SizePreviewPrefs::default().sizes
+        );
     }
 }

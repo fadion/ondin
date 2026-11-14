@@ -182,13 +182,50 @@ pub(super) fn check(
 /// as it is now; the first refusal takes back the rest and is answered.
 pub(crate) fn apply(session: &mut EditorSession, p: &Proposal) -> Result<Applied, String> {
     let mark = session.mark();
-    let made = match run(session, &p.client, &p.calls) {
-        Ok((_, _, made)) => made,
+    let (made, subjects) = match run(session, &p.client, &p.calls) {
+        Ok((_, subjects, made)) => (made, subjects),
         Err(why) => {
             session.rewind(&mark);
             return Err(format!("{why}. Nothing was changed."));
         }
     };
+    // A call that reaches across the document (`replace_text` with no `nodes`)
+    // can reach layers added since the card was drawn. Those the card does not
+    // list, other than the ones this apply creates, are refused.
+    let unlisted: Vec<NodeId> = subjects
+        .into_iter()
+        .filter(|id| !p.writes.contains(id))
+        .collect();
+    if !unlisted.is_empty() {
+        for _ in 0..made {
+            session.take_back();
+        }
+        session.rewind(&mark);
+        if let Some(id) = unlisted.into_iter().find(|id| session.doc.contains(*id)) {
+            let name = session
+                .doc
+                .get(id)
+                .map(|n| n.name().to_owned())
+                .unwrap_or_default();
+            return Err(format!(
+                "The proposal now also changes {name}, which it did not list. Nothing was \
+                 changed; ask for the proposal again."
+            ));
+        }
+        // Only layers it creates: run it again for real.
+        return match run(session, &p.client, &p.calls) {
+            Ok((_, _, made)) => finish_apply(session, p, made),
+            Err(why) => {
+                session.rewind(&mark);
+                Err(format!("{why}. Nothing was changed."))
+            }
+        };
+    }
+    finish_apply(session, p, made)
+}
+
+/// The steps an apply made, joined into one named by the proposal's title.
+fn finish_apply(session: &mut EditorSession, p: &Proposal, made: usize) -> Result<Applied, String> {
     if made == 0 {
         return Err("The proposal changes nothing now.".into());
     }
@@ -363,5 +400,55 @@ mod tests {
         assert_eq!(stale(&docs.session, p).as_deref(), Some("Card"));
         assert!(docs.session.undo());
         assert!(!is_last(&docs.session, &applied), "undone");
+    }
+
+    /// A proposal whose call reaches across the document is refused at Apply
+    /// when it would now change a layer added since, which its card never
+    /// listed; one that only creates layers applies.
+    ///
+    /// flip: `apply` without its unlisted check → fails at "refused".
+    #[test]
+    fn apply_refuses_a_layer_the_card_did_not_list() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let page = docs.session.page.to_wire();
+        let text = |engine: &mut Engine, docs: &mut One, words: &str| {
+            let args = json!({ "parent": page, "text": words });
+            let made = call(engine, docs, 1, "create_text", args);
+            ok(&made)["created"][0].as_str().unwrap().to_owned()
+        };
+        text(&mut engine, &mut docs, "Sign up");
+        let answer = ok(&propose(
+            &mut engine,
+            &mut docs,
+            json!([{ "verb": "replace_text", "args": { "find": "Sign up", "replace": "Join" } }]),
+        ))
+        .clone();
+        let p = engine
+            .proposal(answer["proposal"].as_u64().unwrap())
+            .unwrap()
+            .clone();
+        let late = text(&mut engine, &mut docs, "Sign up today");
+        let late = NodeId::from_wire(&late).unwrap();
+        let depth = docs.session.history.undo_depth();
+        let why = apply(&mut docs.session, &p).expect_err("refused");
+        assert!(why.contains("did not list"), "{why}");
+        assert_eq!(docs.session.history.undo_depth(), depth, "nothing changed");
+        assert!(matches!(
+            docs.session.doc.get(late).unwrap().kind(),
+            ondin_core::NodeKind::Text { content, .. } if content == "Sign up today"
+        ));
+
+        let answer = ok(&propose(
+            &mut engine,
+            &mut docs,
+            json!([{ "verb": "create_text", "args": { "parent": page, "text": "New" } }]),
+        ))
+        .clone();
+        let p = engine
+            .proposal(answer["proposal"].as_u64().unwrap())
+            .unwrap()
+            .clone();
+        apply(&mut docs.session, &p).expect("a proposal that only creates applies");
     }
 }

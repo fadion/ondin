@@ -421,6 +421,13 @@ impl Engine {
         if let Err(why) = check_call(&mut call) {
             return Output::error(why);
         }
+        // Ids start from the launch's time, so a card saved in a thread before
+        // a restart never names a proposal made after it.
+        if self.proposed == 0 {
+            self.proposed = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(1, |d| d.as_millis() as u64 * 1000);
+        }
         let next = self.proposed + 1;
         let conn = self.client(&call);
         if call.tool == "use_document" {

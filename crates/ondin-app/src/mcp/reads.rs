@@ -275,27 +275,17 @@ pub(super) fn styles(doc: &Document) -> Value {
     json!({ "styles": styles })
 }
 
-/// A coordinate to 0.1, written as a whole number when it is one: the outline
-/// and the find answer many of them, and `120` reads as `120.0` does.
-fn tenth(v: f64) -> Value {
-    let r = (v * 10.0).round() / 10.0;
-    match r {
-        r if !r.is_finite() || r == 0.0 => json!(0),
-        r if r.fract() == 0.0 && r.abs() < 1e15 => json!(r as i64),
-        r => json!(r),
-    }
-}
+/// Where a layer's own (0, 0) lies in world space; `design_context`'s root
+/// carries the same answer.
+pub(super) use ondin_export::context::origin;
 
 /// A layer's own box in world space as `[x, y, w, h]` to 0.1, its stroke left
 /// out, as the inspector's W and H read it: the outline and the find place
 /// layers, and a stroke's ink would put a 64 square at 67. Null for a layer
-/// without one.
+/// without one. The box is `design_context`'s, so the two reads agree.
 pub(super) fn bounds_box(s: &EditorSession, id: NodeId) -> Value {
-    let own = ondin_core::local_box(&s.doc, &s.resolved, id).and_then(|b| {
-        let world = s.resolved.world_transform(id)?;
-        Some(ondin_core::geometry::transform_rect(world, b))
-    });
-    match own.or_else(|| s.resolved.world_bounds(id)) {
+    use ondin_export::context::{own_box, tenth};
+    match own_box(&s.doc, &s.resolved, id) {
         Some(r) => json!([
             tenth(r.x0),
             tenth(r.y0),
@@ -304,18 +294,6 @@ pub(super) fn bounds_box(s: &EditorSession, id: NodeId) -> Value {
         ]),
         None => Value::Null,
     }
-}
-
-/// Where `id`'s own (0, 0) lies in world space, as `[x, y]` to 0.1: a child's
-/// position in `id`, which the writes take, is its world box less this. A page
-/// is at the origin.
-pub(super) fn origin(res: &ondin_core::Resolved, id: NodeId) -> Value {
-    let o = res
-        .world_transform(id)
-        .map_or(ondin_core::kurbo::Point::ZERO, |w| {
-            w * ondin_core::kurbo::Point::ZERO
-        });
-    json!([tenth(o.x), tenth(o.y)])
 }
 
 /// Whether `id` is `root` or lies under it.
@@ -482,5 +460,96 @@ mod tests {
             wire(light),
             "Mode 1 reads the kit's first: {read}"
         );
+    }
+
+    /// `get_outline` and `design_context` on a turned frame inside another give
+    /// the same origin and the same stroke-free box for its stroked child, so a
+    /// box less the origin is one position whichever read it came from.
+    ///
+    /// flip: `bounds_box` reading `world_bounds` → fails at the child's box,
+    /// which grows by the stroke.
+    #[test]
+    fn the_outline_and_design_context_place_a_layer_alike() {
+        use ondin_core::kurbo::{Affine, RoundedRectRadii, Size};
+        use ondin_core::{NodeKind, Stroke};
+        let frame = |w: f64, h: f64| {
+            json!(NodeKind::Artboard {
+                size: Size::new(w, h),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            })
+        };
+        let rect = json!(NodeKind::Rect {
+            size: Size::new(50.0, 30.0),
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
+        });
+        let turned = Affine::translate((40.0, 30.0)) * Affine::rotate(0.5);
+        let tree = json!({
+            "kind": frame(600.0, 400.0), "name": "Outer", "transform": Affine::translate((100.0, 50.0)),
+            "children": [{
+                "kind": frame(300.0, 200.0), "name": "Inner", "transform": turned,
+                "children": [{
+                    "kind": rect, "name": "Box", "transform": Affine::translate((20.0, 10.0)),
+                    "strokes": [Stroke { width: 6.0, ..Default::default() }],
+                }],
+            }],
+        });
+        let mut s = EditorSession::new();
+        let starter: Vec<String> = s
+            .doc
+            .get(s.page)
+            .unwrap()
+            .children()
+            .iter()
+            .map(|c| c.to_wire())
+            .collect();
+        let page = s.page.to_wire();
+        let call = |s: &mut EditorSession, name: &str, args: Value| {
+            let done = {
+                let mut ctx = ondin_core::verbs::Ctx {
+                    doc: &s.doc,
+                    res: &s.resolved,
+                    ids: &mut s.ids,
+                    images: None,
+                    contrast: None,
+                };
+                ondin_core::verbs::call(&mut ctx, name, &args).unwrap()
+            };
+            s.try_commit(done.tx).unwrap();
+        };
+        if !starter.is_empty() {
+            call(&mut s, "delete_node", json!({ "nodes": starter }));
+        }
+        call(
+            &mut s,
+            "insert_subtree",
+            json!({ "parent": page, "tree": tree }),
+        );
+        let outer = s.doc.get(s.page).unwrap().children()[0];
+        let inner = s.doc.get(outer).unwrap().children()[0];
+        let outline = outline(&s, inner, 1, 50);
+        let context = ondin_export::context::design_context(&s.doc, &s.resolved, inner).unwrap();
+        assert_eq!(
+            outline["origin"], context["root"]["origin"],
+            "{outline} {context}"
+        );
+        assert_eq!(outline["origin"], json!([140, 80]), "{outline}");
+        let row = outline["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r[1] == "Box")
+            .unwrap()
+            .clone();
+        assert!(
+            row[5].as_f64().unwrap() > 51.0,
+            "the fixture turns the box: {row}"
+        );
+        let section = &context["sections"][0]["box"];
+        for k in 0..4 {
+            let (a, b) = (row[3 + k].as_f64().unwrap(), section[k].as_f64().unwrap());
+            assert!((a - b).abs() < 0.06, "edge {k}: {row} against {section}");
+        }
     }
 }

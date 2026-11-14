@@ -15,19 +15,23 @@ use std::collections::HashMap;
 
 /// Where `id`'s own (0, 0) lies in world space, as `[x, y]` to 0.1: a child's
 /// position in `id` is its own box less this. A page is at the origin.
+/// `get_outline` answers this too, so the two reads place a layer alike.
 pub fn origin(res: &Resolved, id: NodeId) -> Value {
     let o = res
         .world_transform(id)
         .map_or(Point::ZERO, |w| w * Point::ZERO);
-    let tenth = |v: f64| {
-        let r = (v * 10.0).round() / 10.0;
-        match r {
-            r if !r.is_finite() || r == 0.0 => json!(0),
-            r if r.fract() == 0.0 && r.abs() < 1e15 => json!(r as i64),
-            r => json!(r),
-        }
-    };
     json!([tenth(o.x), tenth(o.y)])
+}
+
+/// A coordinate to 0.1, written as a whole number when it is one: `120` reads
+/// as `120.0` does.
+pub fn tenth(v: f64) -> Value {
+    let r = (v * 10.0).round() / 10.0;
+    match r {
+        r if !r.is_finite() || r == 0.0 => json!(0),
+        r if r.fract() == 0.0 && r.abs() < 1e15 => json!(r as i64),
+        r => json!(r),
+    }
 }
 
 /// The most text styles, colours, radii, shadows and names listed; past it a
@@ -130,7 +134,7 @@ fn frame_box(doc: &Document, res: &Resolved, id: NodeId) -> Option<Rect> {
 
 /// `id`'s own box in world space, its stroke left out, as `set`'s `at` places it
 /// and `get_outline` reads it; its world box when it has no own box.
-fn own_box(doc: &Document, res: &Resolved, id: NodeId) -> Option<Rect> {
+pub fn own_box(doc: &Document, res: &Resolved, id: NodeId) -> Option<Rect> {
     ondin_core::local_box(doc, res, id)
         .and_then(|b| {
             let w = res.world_transform(id)?;

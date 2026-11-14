@@ -336,9 +336,11 @@ mod tests {
     }
 
     /// An agent's write to the tab in front ends the person's text edit first,
-    /// so what they typed is kept as its own step; a read leaves it open.
+    /// so what they typed is kept as its own step; a read, a proposal among
+    /// them, leaves it open.
     ///
-    /// flip: `OndinApp::before_write` doing nothing → fails at "the edit ended".
+    /// flip: `OndinApp::before_write` doing nothing → fails at "the edit ended";
+    /// `Engine::answer` gating on `PHASE_1` → fails at "a proposal leaves".
     #[test]
     fn an_agents_write_keeps_the_persons_typing() {
         let dir = std::env::temp_dir().join(format!("ondin-mcp-typing-{}", std::process::id()));
@@ -383,6 +385,21 @@ mod tests {
             json!({ "id": id.to_wire() }),
         );
         assert!(app.text.is_some(), "a read leaves the edit open");
+        let rename = json!({ "verb": "set_name", "args": { "node": page, "name": "Q" } });
+        call(
+            &mut engine,
+            &mut app,
+            "propose_edit",
+            json!({ "title": "Rename", "calls": [rename] }),
+        );
+        assert!(app.text.is_some(), "a proposal leaves the edit open");
+        // Answered or refused, a read past Phase 1 leaves it open too.
+        let (reply, _answer) = std::sync::mpsc::sync_channel(1);
+        engine.handle(
+            &mut app,
+            Call::new(1, None, "list_versions", json!({}), reply),
+        );
+        assert!(app.text.is_some(), "a later read leaves the edit open");
         call(
             &mut engine,
             &mut app,

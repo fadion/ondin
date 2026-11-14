@@ -531,7 +531,7 @@ impl Engine {
         if let Err(why) = fonts_checked {
             return Output::error(why);
         }
-        if !ondin_mcp::tools::PHASE_1.contains(&call.tool.as_str()) {
+        if ondin_mcp::schema::class(&call.tool) != ondin_mcp::schema::Class::Read {
             docs.before_write(&path);
         }
         let Some(session) = docs.session(&path) else {

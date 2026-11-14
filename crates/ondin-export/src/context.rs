@@ -7,7 +7,9 @@
 use ondin_core::kurbo::{Point, Rect};
 use ondin_core::peniko::Color;
 use ondin_core::typography::{CharAttr, Length};
-use ondin_core::{Brush, Document, NodeId, NodeKind, Resolved, TextSizing};
+use ondin_core::{
+    Brush, Document, NodeId, NodeKind, Resolved, StrokeAlign, StrokeSides, TextSizing,
+};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
@@ -805,13 +807,31 @@ fn draws_nothing(doc: &Document, id: NodeId, kind: &NodeKind, laid_out: bool) ->
     !filled && !stroked
 }
 
-/// Whether layer `id` has a visible stroke of width that puts ink down.
-fn stroked(doc: &Document, id: NodeId) -> bool {
+/// Whether a stroke of layer `id`, of used kind `kind`, draws a line along its
+/// box flat on one side (`flat_height` when it is the height that is nil): a
+/// visible stroke of width that inks, not laid inside (which a flat box has no
+/// room for), and on a long side. A text's stroke outlines glyphs, so a text
+/// flat on one side, which has none, never draws.
+fn draws_flat(doc: &Document, id: NodeId, kind: &NodeKind, flat_height: bool) -> bool {
+    if matches!(kind, NodeKind::Text { .. }) {
+        return false;
+    }
+    let inside_applies = ondin_core::geometry::stroke_align_applies(kind);
     doc.get(id).is_some_and(|n| {
-        doc.resolved_paint(id, n.paint())
-            .strokes
-            .iter()
-            .any(|st| st.visible && st.width > 0.0 && inks(st.brush.drawn()))
+        doc.resolved_paint(id, n.paint()).strokes.iter().any(|st| {
+            let [top, right, bottom, left] = match ondin_core::geometry::effective_sides(kind, st) {
+                StrokeSides::All => [Some(st.width); 4],
+                sides => sides.widths(st.width),
+            };
+            let long = match flat_height {
+                true => [top, bottom],
+                false => [left, right],
+            };
+            st.visible
+                && inks(st.brush.drawn())
+                && !(inside_applies && st.align == StrokeAlign::Inside)
+                && long.iter().flatten().any(|w| *w > 0.0)
+        })
     })
 }
 
@@ -1121,7 +1141,7 @@ fn walk(
     if !page && !matches!(kind, NodeKind::Slice { .. }) {
         *checked += 1;
         let one = |code: &str, message: String| issue(code, &[id], message);
-        // A box flat on one side still draws as a line when it is stroked.
+        // A box flat on one side still draws as a line when a stroke lies along it.
         if let Some(size) = match kind {
             NodeKind::Text { .. } => res.text_layout(id).map(|l| l.size),
             NodeKind::Line { .. } | NodeKind::Arc { .. } | NodeKind::Spiral { .. } => None,
@@ -1129,7 +1149,7 @@ fn walk(
         } && match (size.width <= 0.01, size.height <= 0.01) {
             (true, true) => true,
             (false, false) => false,
-            _ => !stroked(doc, id),
+            (_, flat_height) => !draws_flat(doc, id, kind, flat_height),
         } {
             issues.push(one(
                 "zero_size",
@@ -1825,23 +1845,54 @@ mod tests {
         assert_eq!(found(&s), want);
     }
 
-    /// A box flat on one side but stroked draws a line and is not `zero_size`;
-    /// unstroked, or flat on both sides, it is.
+    /// A box flat on one side draws a line, and is not `zero_size`, when a
+    /// stroke lies along its long side: centred or outside, on every side or on
+    /// that one. Unstroked, stroked inside, stroked only on a short side, flat on
+    /// both sides, or a text with no glyphs, it is.
     ///
-    /// flip: `walk` firing on one flat side whatever the stroke → fails at the
-    /// codes, which gain `zero_size` for "Divider".
+    /// flip: `draws_flat` answering for any visible stroke → fails at the codes,
+    /// which lose `zero_size` for "Inside", "Ends", "Stroked text" and "Upright ends".
     #[test]
     fn a_stroked_flat_box_is_a_line_not_zero_size() {
+        let lined = |align: StrokeAlign, sides: StrokeSides| {
+            json!([ondin_core::Stroke {
+                width: 2.0,
+                align,
+                sides,
+                ..Default::default()
+            }])
+        };
+        let empty = || text("", 16.0, 400, TextSizing::Auto, BlockStyle::default());
         let (s, _) = with(json!({
-            "kind": frame(300.0, 300.0), "name": "Card", "fills": fill(255, 255, 255),
+            "kind": frame(300.0, 400.0), "name": "Card", "fills": fill(255, 255, 255),
             "children": [
                 { "kind": rect(100.0, 0.0, 0.0), "name": "Divider", "transform": at(10.0, 50.0), "strokes": stroke(2.0) },
                 { "kind": rect(100.0, 0.0, 0.0), "name": "Flat", "transform": at(10.0, 100.0) },
                 { "kind": rect(0.0, 0.0, 0.0), "name": "Dot", "transform": at(10.0, 150.0), "strokes": stroke(2.0) },
+                { "kind": rect(100.0, 0.0, 0.0), "name": "Inside", "transform": at(10.0, 170.0), "strokes": lined(StrokeAlign::Inside, StrokeSides::All) },
+                { "kind": rect(100.0, 0.0, 0.0), "name": "Outside", "transform": at(10.0, 190.0), "strokes": lined(StrokeAlign::Outside, StrokeSides::All) },
+                { "kind": rect(100.0, 0.0, 0.0), "name": "Ends", "transform": at(10.0, 210.0), "strokes": lined(StrokeAlign::Center, StrokeSides::Left) },
+                { "kind": rect(100.0, 0.0, 0.0), "name": "Rule", "transform": at(10.0, 230.0), "strokes": lined(StrokeAlign::Center, StrokeSides::Bottom) },
+                { "kind": rect(0.0, 100.0, 0.0), "name": "Upright", "transform": at(200.0, 10.0), "strokes": lined(StrokeAlign::Center, StrokeSides::Left) },
+                { "kind": rect(0.0, 100.0, 0.0), "name": "Upright ends", "transform": at(220.0, 10.0), "strokes": lined(StrokeAlign::Center, StrokeSides::Top) },
+                { "kind": empty(), "name": "Stroked text", "transform": at(10.0, 300.0), "strokes": stroke(2.0) },
+                { "kind": empty(), "name": "Plain text", "transform": at(10.0, 340.0) },
             ],
         }));
-        let want = [("zero_size", "Dot"), ("zero_size", "Flat")]
-            .map(|(c, n)| (c.to_owned(), n.to_owned()));
+        let card = s.doc.get(s.page).unwrap().children()[0];
+        let stroked_text = s.doc.get(card).unwrap().children()[9];
+        let size = s.resolved.text_layout(stroked_text).unwrap().size;
+        assert!(size.width <= 0.01, "the fixture's text is flat: {size:?}");
+        let want = [
+            ("zero_size", "Dot"),
+            ("zero_size", "Ends"),
+            ("zero_size", "Flat"),
+            ("zero_size", "Inside"),
+            ("zero_size", "Plain text"),
+            ("zero_size", "Stroked text"),
+            ("zero_size", "Upright ends"),
+        ]
+        .map(|(c, n)| (c.to_owned(), n.to_owned()));
         assert_eq!(found(&s), want);
     }
 

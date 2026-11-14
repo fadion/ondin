@@ -389,9 +389,10 @@ impl Engine {
         }
         .unwrap_or("call")
         .to_owned();
-        let out = match access::refused(level, &call) {
-            Some(why) => Output::error(why),
-            None => self.answer(docs, call),
+        let out = match level.map(|level| access::refused(level, &call)) {
+            None => Output::error(access::CHAT_ENDED),
+            Some(Some(why)) => Output::error(why),
+            Some(None) => self.answer(docs, call),
         };
         let document = self
             .clients

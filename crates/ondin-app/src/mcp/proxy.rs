@@ -28,13 +28,24 @@ trait Hosts {
     fn window_listed(&mut self) -> bool;
 }
 
+/// The refusal an assistant's proxy answers when no window lists an endpoint.
+const AGENT_NEEDS_WINDOW: &str =
+    "Ondin's window is not reachable; an assistant's agent works only through it";
+
 /// The hosts this machine runs.
 struct Machine;
 
 impl Hosts for Machine {
     fn connect(&mut self) -> Result<(Host, endpoint::Stream), String> {
-        let found = match endpoint::hosts().into_iter().next() {
+        // An assistant's agent acts only through the window, which holds its
+        // chat's grant; `serve` holds none and would let it act unchecked.
+        let agent = std::env::var_os(ondin_ai::AGENT_CHILD_ENV).is_some();
+        let found = endpoint::hosts()
+            .into_iter()
+            .find(|h| !agent || h.host == Host::Window);
+        let found = match found {
             Some(h) => h,
+            None if agent => return Err(AGENT_NEEDS_WINDOW.into()),
             None => start_serve()?,
         };
         let stream =

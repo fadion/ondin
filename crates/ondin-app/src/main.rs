@@ -1039,11 +1039,11 @@ fn main() {
     // headless export alike, since the updater stops both.
     instances::register();
     let parsed = parse(&args);
-    // An assistant's harness runs marked; its MCP server is `mcp-proxy`, which may
-    // start `serve`, and nothing else is its to run. A speed bump, not a boundary:
-    // the host's grants hold the level.
+    // An assistant's harness runs marked; its MCP server is `mcp-proxy`, which
+    // reaches only the window, and nothing else is its to run. A speed bump, not
+    // a boundary: the window's grants hold the level.
     if std::env::var_os(ondin_ai::AGENT_CHILD_ENV).is_some()
-        && !matches!(parsed, Ok(Command::McpProxy { .. } | Command::Serve))
+        && !matches!(parsed, Ok(Command::McpProxy { .. }))
     {
         eprintln!("ondin: refused inside an assistant's agent; only `mcp-proxy` runs there");
         std::process::exit(2);

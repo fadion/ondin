@@ -137,9 +137,17 @@ pub(crate) type Owns = Arc<dyn Fn(u32) -> bool + Send + Sync>;
 
 struct Grant {
     key: String,
-    level: Level,
+    /// `None` once the chat ended: its calls still in flight are refused, not
+    /// answered as an ungranted client's.
+    level: Option<Level>,
     owns: Owns,
 }
+
+/// The most ended chats whose late calls are still recognised.
+const ENDED_KEPT: usize = 32;
+
+/// The refusal a call from an ended chat gets.
+pub(crate) const CHAT_ENDED: &str = "This chat has ended: nothing was changed.";
 
 /// The levels the window granted its chats, shared with every connection's
 /// thread, which reads them for `tools/list`.
@@ -154,22 +162,38 @@ impl Grants {
         grants.retain(|g| g.key != key);
         grants.push(Grant {
             key: key.to_owned(),
-            level,
+            level: Some(level),
             owns,
         });
     }
 
+    /// End the chat `key`'s grant; what it still sends is refused, and only the
+    /// last [`ENDED_KEPT`] ended chats are remembered.
     pub(crate) fn revoke(&self, key: &str) {
         let mut grants = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        grants.retain(|g| g.key != key);
+        if let Some(g) = grants.iter_mut().find(|g| g.key == key) {
+            g.level = None;
+        }
+        let ended = grants.iter().filter(|g| g.level.is_none()).count();
+        let mut drop = ended.saturating_sub(ENDED_KEPT);
+        grants.retain(|g| {
+            let old = g.level.is_none() && drop > 0;
+            drop -= usize::from(old);
+            !old
+        });
     }
 
     /// The chat key and level a caller acts under: the chat owning `pid`
     /// first, whatever key the caller gave, else the grant of the key it gave.
-    /// `None` for a caller no grant covers.
-    pub(crate) fn resolve(&self, key: Option<&str>, pid: Option<u32>) -> Option<(String, Level)> {
+    /// The level is `None` for a chat that ended; the whole answer `None` for a
+    /// caller no grant covers.
+    pub(crate) fn resolve(
+        &self,
+        key: Option<&str>,
+        pid: Option<u32>,
+    ) -> Option<(String, Option<Level>)> {
         // Copied out, so no `owns` runs under the lock.
-        let grants: Vec<(String, Level, Owns)> = {
+        let grants: Vec<(String, Option<Level>, Owns)> = {
             let grants = self.0.lock().unwrap_or_else(|e| e.into_inner());
             grants
                 .iter()
@@ -194,7 +218,7 @@ impl Grants {
         Arc::new(move |key, pid| {
             grants
                 .resolve(key, pid)
-                .map(|(_, level)| definitions(level))
+                .map(|(_, level)| level.map(definitions).unwrap_or_default())
         })
     }
 }
@@ -363,7 +387,7 @@ mod tests {
         grants.grant("other", Level::Edit, nobody());
         assert_eq!(
             grants.resolve(Some("other"), Some(4242)),
-            Some(("chat-1".into(), Level::Look)),
+            Some(("chat-1".into(), Some(Level::Look))),
             "the other key's level"
         );
         assert_eq!(grants.resolve(None, Some(1)), None);
@@ -402,6 +426,57 @@ mod tests {
         let listed = (grants.lists())(Some("other"), Some(4242)).unwrap();
         assert!(!listed.iter().any(|d| d["name"] == "set"));
         grants.revoke("chat-1");
-        assert_eq!(grants.resolve(None, Some(4242)), None, "revoked");
+        assert_eq!(
+            grants.resolve(None, Some(4242)),
+            Some(("chat-1".into(), None)),
+            "revoked"
+        );
+    }
+
+    /// A call an ended chat still sends, by key or by process, is refused and
+    /// changes nothing; it is not answered as an ungranted client's.
+    ///
+    /// flip: `Grants::revoke` removing the grant → fails at "refused by key".
+    #[test]
+    fn an_ended_chat_is_refused_not_ungranted() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        let grants = engine.grants();
+        grants.grant("chat-1", Level::Edit, Arc::new(|pid| pid == 4242));
+        ok(&keyed(
+            &mut engine,
+            &mut docs,
+            1,
+            Some("chat-1"),
+            "use_document",
+            json!({ "document": "a" }),
+        ));
+        grants.revoke("chat-1");
+        let page = docs.session.doc.first_page();
+        let rename = json!({ "node": page.to_wire(), "name": "x" });
+        let out = keyed(
+            &mut engine,
+            &mut docs,
+            2,
+            Some("chat-1"),
+            "set_name",
+            rename.clone(),
+        );
+        assert!(out.is_error, "refused by key");
+        let (reply, _answer) = std::sync::mpsc::sync_channel(1);
+        let mut call = Call::new(9, None, "set_name", rename, reply);
+        call.pid = Some(4242);
+        assert!(
+            engine.handle(&mut docs, call).is_error,
+            "refused by process"
+        );
+        assert_ne!(docs.session.doc.get(page).unwrap().name(), "x");
+        // Ended chats past the cap are forgotten, oldest first.
+        for i in 0..=ENDED_KEPT {
+            let key = format!("k{i}");
+            grants.grant(&key, Level::Look, nobody());
+            grants.revoke(&key);
+        }
+        assert_eq!(grants.resolve(Some("chat-1"), None), None);
+        assert!(grants.resolve(Some("k1"), None).is_some());
     }
 }

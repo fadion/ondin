@@ -951,6 +951,15 @@ impl OndinApp {
             return Ok(());
         }
         self.assistant.end_session(None);
+        // The chat's level lives in the window's grants; with no endpoint there
+        // is nowhere to hold it.
+        if self.mcp.is_none() {
+            return Err(
+                "Ondin could not open its connection for agents, so the assistant cannot work \
+                 on this document. Restart Ondin and try again."
+                    .into(),
+            );
+        }
         let found = match self.assistant_lookup(h) {
             Some(Ok(f)) => f,
             Some(Err(nf)) => return Err(Why::NotFound(h, nf).sentence()),

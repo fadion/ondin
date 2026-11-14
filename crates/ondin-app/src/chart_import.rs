@@ -980,14 +980,14 @@ fn preview(ui: &mut egui::Ui, table: &chart::Table) {
                     egui::FontId::proportional(ui::SMALL_PT),
                     theme::text::strong(),
                 );
-                for r in 0..rows {
+                for (r, row) in table.rows.iter().enumerate().take(rows) {
                     let cell = egui::Rect::from_min_size(
                         egui::pos2(x, rect.top() + PREVIEW_ROW_H * (r as f32 + 1.0)),
                         egui::vec2(PREVIEW_COL_W, PREVIEW_ROW_H),
                     );
                     p.rect_filled(cell, 0.0, theme::color::field());
                     p.rect_stroke(cell, 0.0, hairline, egui::StrokeKind::Inside);
-                    let text = &table.rows[r][c];
+                    let text = &row[c];
                     let clip = p.with_clip_rect(cell.shrink(1.0));
                     let (pos, align) = if numeric {
                         (

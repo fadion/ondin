@@ -1137,10 +1137,7 @@ impl OndinApp {
             }
             return true;
         }
-        if self.session.style_edit.take().is_some() {
-            return true;
-        }
-        false
+        self.session.style_edit.take().is_some()
     }
 
     /// The browser's *Edit* (§15 D1063): select the style's users and open

@@ -843,8 +843,8 @@ fn grid(
                 }
             }
         }
-        for r in first..last {
-            for c in c_first..c_last {
+        for (r, row) in t.rows.iter().enumerate().take(last).skip(first) {
+            for (c, text) in row.iter().enumerate().take(c_last).skip(c_first) {
                 let rc = cell_rect(r, c);
                 let lit = rows_sel.contains(&r) && cols_sel.contains(&c);
                 p.rect_filled(
@@ -857,7 +857,6 @@ fn grid(
                     },
                 );
                 p.rect_stroke(rc, 0.0, hairline, egui::StrokeKind::Inside);
-                let text = &t.rows[r][c];
                 if !text.is_empty() && typing_at != Some((r, c)) {
                     let ink = if linked {
                         theme::text::muted()

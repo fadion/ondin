@@ -128,10 +128,8 @@ hayro-svg = "0.8.0"
 # --- ondin-app (UI chrome + windowing) — egui trio pinned exactly, moves together ---
 # eframe (default features) owns the window + wgpu device + event loop; it pulls
 # egui/egui-wgpu/egui-winit/winit at matching versions (§9.1 harness decision).
-winit = "0.30.13"
 egui = "=0.35.0"
 egui-wgpu = "=0.35.0"
-egui-winit = "=0.35.0"
 eframe = "=0.35.0"
 rfd = "0.17.2"
 # The OS clipboard, for pasting an image (§5.5a). **Already in the lock at this

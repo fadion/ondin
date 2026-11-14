@@ -3120,11 +3120,10 @@ fn the_app_and_core_number_a_paths_anchors_alike() {
                 false => sub.anchors.len().saturating_sub(1),
             };
             assert_eq!(run.segs.len(), want, "subpath {i} segment count");
-            for j in 0..run.segs.len() {
+            for (j, &seg) in run.segs.iter().enumerate() {
                 let (from, to) =
                     segment_ends(&subs, (i, j)).unwrap_or_else(|| panic!("segment {i}.{j}"));
                 assert_eq!(from, (i, j), "a segment is named by the anchor it leaves");
-                let seg = run.segs[j];
                 assert_eq!(seg.start(), sub.anchors[from.1].at, "subpath {i} seg {j}");
                 assert_eq!(seg.end(), sub.anchors[to.1].at, "subpath {i} seg {j}");
             }

@@ -203,6 +203,12 @@ impl Tracker {
     /// nothing it starts can escape before then, and `cmd.exe` behind a shim
     /// never looks a bare command up in its working folder.
     pub(crate) fn spawn(&self, cmd: &mut Command) -> std::io::Result<Child> {
+        // OpenCode's runtime reads an inherited `PWD` as its working folder, so
+        // started from a shell it would run in the shell's folder, not this one.
+        match cmd.get_current_dir().map(Path::to_path_buf) {
+            Some(dir) => cmd.env("PWD", dir),
+            None => cmd.env_remove("PWD"),
+        };
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -612,6 +618,37 @@ mod tests {
         assert!(!tracker.owns(child.id()));
         let _ = child.kill();
         let _ = child.wait();
+    }
+
+    /// A child's `PWD` names its own working folder, never one it inherited.
+    /// flip: `Tracker::spawn` without the `PWD` match → fails at `PWD is the folder`.
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn a_child_reads_its_own_folder_as_pwd() {
+        let scratch = Scratch::new().unwrap();
+        let mut cmd = match cfg!(windows) {
+            true => {
+                let mut c = Command::new("cmd");
+                c.args(["/C", "echo %PWD%"]);
+                c
+            }
+            false => {
+                let mut c = Command::new("sh");
+                c.args(["-c", "printf '%s' \"$PWD\""]);
+                c
+            }
+        };
+        cmd.current_dir(scratch.path())
+            .env("PWD", std::env::temp_dir().join("elsewhere"))
+            .stdout(std::process::Stdio::piped());
+        let tracker = Tracker::new();
+        let out = tracker.spawn(&mut cmd).unwrap().wait_with_output().unwrap();
+        let pwd = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+        assert_eq!(
+            std::path::Path::new(&pwd),
+            scratch.path(),
+            "PWD is the folder"
+        );
     }
 
     /// Killing a child started through a `.cmd` ends the program the batch

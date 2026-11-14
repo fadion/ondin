@@ -221,6 +221,41 @@ fn align_puts_the_centroid_on_the_line() {
     assert!(at.distance(Point::new(250.0, 134.0)) < 1e-6, "{at:?}");
 }
 
+/// A text already on the line does not move and is not counted among the moved
+/// texts; one that moves is.
+///
+/// flip: `align` counting every text member, moved or not → fails at "the text
+/// in place is not counted".
+#[test]
+fn align_counts_only_the_texts_it_moves() {
+    let mut f = Fixture::new();
+    let words = NodeKind::Text {
+        content: "Words".into(),
+        style: Box::default(),
+        spans: Default::default(),
+        para_spans: Default::default(),
+        paragraph: Default::default(),
+        block: Default::default(),
+        sizing: ondin_core::TextSizing::Auto,
+        on_path: None,
+        on_path_flip: false,
+        on_path_offset: 0.0,
+    };
+    let t = f.add(f.frame, words, (20.0, 20.0), &[]);
+    let dot = f.rect(f.frame, (200.0, 100.0, 10.0, 10.0), &[filled]);
+    let res = Resolved::rebuild(&f.doc);
+    let line = f.centre(t).at().x;
+    assert!(
+        matches!(f.centre(t), VisualCentre::Text(_)),
+        "the fixture's text"
+    );
+    let (tx, text) = centroid::align(&f.doc, &res, &[t, dot], line, Axis::X);
+    assert!(!tx.0.is_empty(), "the dot moves");
+    assert_eq!(text, 0, "the text in place is not counted");
+    let (_, text) = centroid::align(&f.doc, &res, &[t, dot], line + 10.0, Axis::X);
+    assert_eq!(text, 1, "the text that moves is");
+}
+
 fn unfilled(id: NodeId) -> Operation {
     Operation::SetFills {
         id,

@@ -74,13 +74,15 @@ pub fn align(
         let Some(centre) = visual_centre(doc, res, id) else {
             continue;
         };
-        text += usize::from(matches!(centre, VisualCentre::Text(_)));
         let p = centre.at();
         let delta = match axis {
             crate::build::Axis::X => kurbo::Vec2::new(at - p.x, 0.0),
             crate::build::Axis::Y => kurbo::Vec2::new(0.0, at - p.y),
         };
+        let before = ops.len();
         crate::build::push_offset(doc, res, id, delta, &mut ops);
+        // A member already in place pushes nothing and is not counted.
+        text += usize::from(ops.len() > before && matches!(centre, VisualCentre::Text(_)));
     }
     (crate::op::Transaction(ops), text)
 }

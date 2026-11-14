@@ -11525,7 +11525,6 @@ impl OndinApp {
         // The layers the step moves: not the key, nor one already in place.
         let subjects = tx.subjects();
         let moved = ids.iter().filter(|id| subjects.contains(id)).count();
-        let text = text.min(moved);
         self.session
             .name_step("Align visual centres", icon::VISUAL_CENTRE);
         if tx.0.is_empty() || !self.commit_edit(tx) {

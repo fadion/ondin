@@ -224,6 +224,12 @@ impl Documents for OndinApp {
     fn tell(&mut self, line: String) {
         self.session.info(line);
     }
+
+    fn before_write(&mut self, path: &Path) {
+        if self.tab_of_path(path).is_some() && self.tab_of_path(path) == self.tabs.active {
+            self.finish_text_first();
+        }
+    }
 }
 
 impl OndinApp {
@@ -308,6 +314,110 @@ mod tests {
             panic!("not parked");
         };
         assert!(!p.session.is_dirty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An agent's write to the tab in front ends the person's text edit first,
+    /// so what they typed is kept as its own step; a read leaves it open.
+    ///
+    /// flip: `OndinApp::before_write` doing nothing → fails at "the edit ended".
+    #[test]
+    fn an_agents_write_keeps_the_persons_typing() {
+        let dir = std::env::temp_dir().join(format!("ondin-mcp-typing-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("dashboard.ondin");
+        let mut ids = ondin_core::IdSource::new(crate::session::random_actor());
+        let doc = ondin_core::Document::new(ids.mint());
+        let page = doc.first_page().to_wire();
+        std::fs::write(&file, ondin_core::io::save(&doc).unwrap()).unwrap();
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut engine = Engine::default();
+        let document = json!({ "document": file.display().to_string() });
+        call(&mut engine, &mut app, "use_document", document);
+        app.activate_tab(app.tab_of_path(&file).unwrap());
+        let made = call(
+            &mut engine,
+            &mut app,
+            "create_text",
+            json!({ "parent": page, "text": "Hello" }),
+        );
+        let id = ondin_core::NodeId::from_wire(made["created"][0].as_str().unwrap()).unwrap();
+        let node = app.session.doc.get(id).unwrap();
+        let parts = ondin_core::TextParts::of(node.kind()).unwrap();
+        let original = (
+            "Hello".to_owned(),
+            parts.spans.clone(),
+            parts.para_spans.clone(),
+        );
+        app.text = Some(crate::preview::TextSession {
+            id,
+            editor: ondin_core::TextEdit::new("Hello there", parts),
+            original,
+            created: false,
+            blink: Default::default(),
+        });
+        app.mode = crate::input::Mode::TextInsert;
+        call(
+            &mut engine,
+            &mut app,
+            "get_node",
+            json!({ "id": id.to_wire() }),
+        );
+        assert!(app.text.is_some(), "a read leaves the edit open");
+        call(
+            &mut engine,
+            &mut app,
+            "set_name",
+            json!({ "node": page, "name": "P" }),
+        );
+        assert!(app.text.is_none(), "the edit ended");
+        let ondin_core::NodeKind::Text { content, .. } = app.session.doc.get(id).unwrap().kind()
+        else {
+            panic!("not a text");
+        };
+        assert_eq!(content.as_str(), "Hello there", "typing kept");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// While the person compares versions, an agent's `undo` and `redo` are
+    /// refused as read-only and change nothing.
+    ///
+    /// flip: `run` without its compare arm for undo/redo → fails at "refused".
+    #[test]
+    fn an_agents_undo_is_refused_while_comparing() {
+        let dir = std::env::temp_dir().join(format!("ondin-mcp-compare-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("dashboard.ondin");
+        let mut ids = ondin_core::IdSource::new(crate::session::random_actor());
+        let doc = ondin_core::Document::new(ids.mint());
+        let page = doc.first_page().to_wire();
+        std::fs::write(&file, ondin_core::io::save(&doc).unwrap()).unwrap();
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut engine = Engine::default();
+        let document = json!({ "document": file.display().to_string() });
+        call(&mut engine, &mut app, "use_document", document);
+        let id = app.tab_of_path(&file).unwrap();
+        app.activate_tab(id);
+        let kind = ondin_core::verbs::example("NodeKind").unwrap();
+        let args = json!({ "parent": page, "kind": kind, "name": "Chart" });
+        call(&mut engine, &mut app, "create_node", args);
+        let pick = crate::compare::Pick {
+            path: file.clone(),
+            title: "Before".into(),
+            when: None,
+        };
+        app.compare_with(pick, None);
+        assert!(app.session.compare.is_some(), "the compare opened");
+        let count = app.session.doc.len();
+        for verb in ["undo", "redo"] {
+            let (reply, _answer) = std::sync::mpsc::sync_channel(1);
+            let out = engine.handle(&mut app, Call::new(1, None, verb, json!({}), reply));
+            assert!(out.is_error, "{verb} refused");
+        }
+        assert_eq!(app.session.doc.len(), count, "nothing changed");
+        app.leave_compare();
         let _ = std::fs::remove_dir_all(&dir);
     }
 

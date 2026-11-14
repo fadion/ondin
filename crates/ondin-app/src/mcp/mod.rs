@@ -54,6 +54,10 @@ pub(crate) trait Documents {
     /// tab in front of the person; `None` behind and in `serve`, where nobody
     /// looks at it.
     fn canvas(&mut self, path: &Path) -> Option<(u32, u32)>;
+    /// A tool that may write is about to run on the document at `path`: the
+    /// window ends the person's text edit there first, so the typing lands as
+    /// its own step rather than being lost under the agent's.
+    fn before_write(&mut self, _path: &Path) {}
 }
 
 /// The document `wanted` names: an absolute path; else a name or relative path
@@ -414,7 +418,7 @@ impl Engine {
             call.tool = tool.to_owned();
             call.args = args;
         }
-        if let Err(why) = check_call(&call) {
+        if let Err(why) = check_call(&mut call) {
             return Output::error(why);
         }
         let next = self.proposed + 1;
@@ -485,20 +489,34 @@ impl Engine {
             _ => None,
         };
         // Core cannot see the host's fonts: a family nobody can set text in would
-        // draw every replaced layer in a fallback. Written in the host's spelling.
-        if call.tool == "replace_font"
-            && let Some(to) = call.args.get("to").and_then(Value::as_str)
-        {
-            let to = to.trim().to_owned();
-            let key = to.to_lowercase();
-            match docs.fonts().into_iter().find(|f| f.to_lowercase() == key) {
-                Some(family) => call.args["to"] = json!(family),
-                None => {
-                    return Output::error(format!(
-                        "`to`: no family called {to} can be set here; `list_fonts` names those that can"
-                    ));
-                }
+        // draw every replaced layer in a fallback. Written in the host's spelling,
+        // whether the call is `replace_font` or one step of a batch or proposal.
+        let fonts_checked = match call.tool.as_str() {
+            "replace_font" => host_font(docs, &mut call.args),
+            "batch" | "propose_edit" => {
+                let list = if call.tool == "batch" {
+                    "steps"
+                } else {
+                    "calls"
+                };
+                let steps = call.args.get_mut(list).and_then(Value::as_array_mut);
+                steps.into_iter().flatten().try_for_each(|step| {
+                    match step.get("tool").and_then(Value::as_str) {
+                        Some("replace_font") => match step.get_mut("args") {
+                            Some(args) => host_font(docs, args),
+                            None => Ok(()),
+                        },
+                        _ => Ok(()),
+                    }
+                })
             }
+            _ => Ok(()),
+        };
+        if let Err(why) = fonts_checked {
+            return Output::error(why);
+        }
+        if !ondin_mcp::tools::PHASE_1.contains(&call.tool.as_str()) {
+            docs.before_write(&path);
         }
         let Some(session) = docs.session(&path) else {
             conn.document = None;
@@ -597,16 +615,53 @@ impl Engine {
     }
 }
 
+/// `replace_font`'s `to`, refused unless a family the host can set text in, and
+/// written in the host's spelling.
+fn host_font(docs: &mut impl Documents, args: &mut Value) -> Result<(), String> {
+    let Some(to) = args.get("to").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    let to = to.trim().to_owned();
+    let key = to.to_lowercase();
+    match docs.fonts().into_iter().find(|f| f.to_lowercase() == key) {
+        Some(family) => {
+            args["to"] = json!(family);
+            Ok(())
+        }
+        None => Err(format!(
+            "`to`: no family called {to} can be set here; `list_fonts` names those that can"
+        )),
+    }
+}
+
 /// Refuse a tool no host serves, before anything else, and a table tool's
 /// arguments as a verb's are refused: unknown, missing or of the wrong kind. A
 /// `"12"` for a `since` read as absent answered in full without a word.
-fn check_call(call: &Call) -> Result<(), String> {
+fn check_call(call: &mut Call) -> Result<(), String> {
     if ondin_core::verbs::find(&call.tool).is_some() {
         return Ok(());
     }
     let Some(tool) = ondin_mcp::schema::tool(&call.tool) else {
         return Err(no_such_tool(&call.tool));
     };
+    // A model parameter some clients send as JSON text reaches the handler
+    // parsed, as the check reads it; a verb's own `Args` does the same.
+    if let Some(map) = call.args.as_object_mut() {
+        for p in tool.params {
+            let ondin_core::verbs::ParamKind::Model(model) = p.kind else {
+                continue;
+            };
+            if matches!(model, "PropValue" | "DtcgFile") {
+                continue;
+            }
+            if let Some(Value::String(s)) = map.get(p.name)
+                && let Ok(parsed) = serde_json::from_str::<Value>(s.trim())
+                && (parsed.is_object() || parsed.is_array())
+            {
+                map.insert(p.name.to_owned(), parsed);
+            }
+        }
+    }
     let mut args = call.args.clone();
     // An empty selection clears it, where a layer list elsewhere needs one.
     if tool.name == "set_selection" && call.args.get("ids") == Some(&json!([])) {
@@ -1137,6 +1192,7 @@ fn run(conn: &Connection, s: &mut EditorSession, call: &Call) -> Result<Answer, 
             };
             Ok(Answer::Image(png))
         }
+        "undo" | "redo" if s.compare.is_some() => Err(READ_ONLY.to_owned()),
         "undo" => {
             let step = own_step(s.history.done().next_back(), &call.client, "undo")?;
             json(json!({ "undone": s.undo().then_some(step).flatten() }))
@@ -2210,8 +2266,22 @@ fn stale(
         .skip(at + 1)
         .flat_map(|s| s.others.iter().map(String::as_str))
         .collect();
-    let moved: Vec<String> = tx
-        .subjects()
+    // A delete writes away its whole subtree, so a layer inside it the person
+    // changed counts as one the call writes.
+    let deleted: Vec<ondin_core::NodeId> =
+        tx.0.iter()
+            .filter_map(|op| match op {
+                ondin_core::Operation::DeleteNode { id } => Some(*id),
+                _ => None,
+            })
+            .collect();
+    let mut written = tx.subjects();
+    for id in ondin_core::build::subtree_nodes(&s.doc, &deleted) {
+        if !written.contains(&id) {
+            written.push(id);
+        }
+    }
+    let moved: Vec<String> = written
         .iter()
         .map(|id| id.to_wire())
         .filter(|id| others.contains(id.as_str()))
@@ -2544,6 +2614,18 @@ mod tests {
         let args = json!({ "from": from, "to": "Nowhere Sans" });
         let out = call(&mut engine, &mut docs, 1, "replace_font", args);
         assert!(out.is_error, "a family the host lacks is refused");
+        // As a batch's step too.
+        let step =
+            json!({ "tool": "replace_font", "args": { "from": from, "to": "Nowhere Sans" } });
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "batch",
+            json!({ "steps": [step] }),
+        );
+        assert!(out.is_error, "a batch step is refused");
+        assert_eq!(family(&docs), from);
         let args = json!({ "from": from, "to": "lora" });
         ok(&call(&mut engine, &mut docs, 1, "replace_font", args));
         assert_eq!(family(&docs), "Lora", "in the host's spelling");
@@ -2720,6 +2802,72 @@ mod tests {
             "set_name",
             rename("Mine", &now),
         ));
+    }
+
+    /// A table tool's model argument sent as JSON text is read as the structure
+    /// it holds, by the handler as well as the check.
+    ///
+    /// flip: `check_call` not writing the parsed value back → fails at "props".
+    #[test]
+    fn json_text_arguments_reach_the_handler_parsed() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let id = rect(&mut engine, &mut docs, 1, "Box");
+        let props = json!({ "name": "Card" }).to_string();
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "set",
+            json!({ "nodes": [id], "props": props }),
+        );
+        ok(&out);
+        let node = ondin_core::NodeId::from_wire(&id).unwrap();
+        assert_eq!(docs.session.doc.get(node).unwrap().name(), "Card", "props");
+        let names = json!(["set_point"]).to_string();
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "describe_tools",
+            json!({ "names": names }),
+        );
+        assert_eq!(ok(&out)["tools"][0]["name"], "set_point", "names");
+    }
+
+    /// A delete with a stale `base_rev` is refused when a layer inside what it
+    /// removes changed, not only the layer it names.
+    ///
+    /// flip: `stale` checking `subjects()` alone → fails at "refused".
+    #[test]
+    fn a_stale_delete_checks_what_it_removes() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        open(&mut engine, &mut docs, 2);
+        let child = rect(&mut engine, &mut docs, 1, "Label");
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "group",
+            json!({ "nodes": [child] }),
+        );
+        let group = ok(&out)["created"][0].as_str().unwrap().to_owned();
+        let read = call(
+            &mut engine,
+            &mut docs,
+            2,
+            "get_node",
+            json!({ "id": group }),
+        );
+        let base = ok(&read)["rev"].clone();
+        let rename = json!({ "node": child, "name": "Edited" });
+        ok(&call(&mut engine, &mut docs, 1, "set_name", rename));
+        let delete = json!({ "nodes": [group], "base_rev": base });
+        let late = call(&mut engine, &mut docs, 2, "delete_node", delete);
+        assert!(late.is_error, "refused");
+        let id = ondin_core::NodeId::from_wire(&child).unwrap();
+        assert!(docs.session.doc.get(id).is_some(), "the child stays");
     }
 
     /// `set` writes several properties through their setters as one undo step

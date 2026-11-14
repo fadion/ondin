@@ -786,8 +786,10 @@ pub(crate) fn turn_args(h: Harness, spec: &TurnSpec) -> Vec<String> {
         }
         Harness::Cursor => {
             // `--trust`: without it a headless run in a new folder stops at a
-            // trust prompt. `--mode ask` is a prompt, not the lever; the
-            // permissions file is. Never `--approve-mcps`, `--force` or `--yolo`.
+            // trust prompt. The permissions file is the lever, not a mode:
+            // `--mode ask` holds back nothing it denies and has the model refuse
+            // the edits a chat at Edit asks for. Never `--approve-mcps`,
+            // `--force` or `--yolo`.
             a.extend(
                 [
                     "-p",
@@ -795,8 +797,6 @@ pub(crate) fn turn_args(h: Harness, spec: &TurnSpec) -> Vec<String> {
                     "stream-json",
                     "--stream-partial-output",
                     "--trust",
-                    "--mode",
-                    "ask",
                 ]
                 .map(String::from),
             );
@@ -1676,7 +1676,7 @@ mod tests {
         s.resume = Some("c-1".into());
         let a = turn_args(Harness::Cursor, &s);
         assert_eq!(&a[a.len() - 2..], &["--resume", "c-1"]);
-        for never in ["--approve-mcps", "--force", "--yolo"] {
+        for never in ["--approve-mcps", "--force", "--yolo", "--mode"] {
             assert!(!a.iter().any(|x| x == never));
         }
     }

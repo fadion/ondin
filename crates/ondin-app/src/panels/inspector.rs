@@ -17252,6 +17252,83 @@ mod align_card_tests {
         assert_eq!(app.visual_centre_marks(), vec![p]);
     }
 
+    /// Past `VISUAL_MARKS_MAX` layers to weigh none is marked, whether they are
+    /// selected or held in one selected group; at the cap each is marked.
+    ///
+    /// flip: `visual_centre_marks` capping on the outermost count → fails at "a
+    /// group of 101".
+    #[test]
+    fn the_marks_stop_past_the_layers_they_would_weigh() {
+        use crate::canvas::VISUAL_MARKS_MAX;
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = ondin_core::IdSource::new(2);
+        let root = ids.mint();
+        let mut doc = ondin_core::Document::new(root);
+        let (frame, group) = (ids.mint(), ids.mint());
+        let square = |id, parent, index: usize| Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind: NodeKind::Rect {
+                size: Size::new(4.0, 4.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::translate((index as f64 * 8.0, 0.0))),
+            name: None,
+        };
+        let mut ops = vec![
+            Operation::CreateNode {
+                id: frame,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(2000.0, 2000.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::CreateNode {
+                id: group,
+                parent: frame,
+                index: 0,
+                kind: NodeKind::Group,
+                transform: Some(Affine::translate((0.0, 100.0))),
+                name: None,
+            },
+        ];
+        let n = VISUAL_MARKS_MAX + 1;
+        let loose: Vec<NodeId> = (0..n).map(|_| ids.mint()).collect();
+        let held: Vec<NodeId> = (0..n).map(|_| ids.mint()).collect();
+        ops.extend(
+            loose
+                .iter()
+                .enumerate()
+                .map(|(i, id)| square(*id, frame, i + 1)),
+        );
+        ops.extend(held.iter().enumerate().map(|(i, id)| square(*id, group, i)));
+        doc.apply(&Transaction(ops)).expect("the fixture");
+        app.session.adopt_document(doc, None);
+        app.align_visual = true;
+
+        app.session.selection.set(loose.clone());
+        assert!(app.visual_centre_marks().is_empty(), "101 selected");
+        app.session
+            .selection
+            .set(loose[..VISUAL_MARKS_MAX].to_vec());
+        assert_eq!(
+            app.visual_centre_marks().len(),
+            VISUAL_MARKS_MAX,
+            "100 selected"
+        );
+        app.session.selection.set(vec![group]);
+        assert!(app.visual_centre_marks().is_empty(), "a group of 101");
+    }
+
     /// The marks hide while a drag or a scrub moves the selection: they are weighed
     /// on the committed document and would stay behind.
     ///

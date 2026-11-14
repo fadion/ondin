@@ -981,10 +981,42 @@ impl Gpu {
 /// the layer's own opacity.
 const GHOST_ALPHA: f32 = 0.3;
 
-/// The most layers the canvas marks visual centres for: weighing unions every
-/// layer's ink on the UI thread (about 94 ms for 1,000 circles in release), and
-/// past this many the diamonds are a field nobody reads.
+/// The most layers the canvas weighs for its visual-centre marks: each marked
+/// layer and, under one weighed by its ink, every layer it holds
+/// (`visual_marks_weight`). Weighing unions all that ink on the UI thread (about
+/// 94 ms for 1,000 circles in release, selected or in one group), and past this
+/// many marked layers the diamonds are a field nobody reads.
 pub(crate) const VISUAL_MARKS_MAX: usize = 100;
+
+/// How many layers weighing `members` for their visual centres reads, counted
+/// only until it passes [`VISUAL_MARKS_MAX`]: each member, and every layer under
+/// one that is weighed by its ink. A frame and a text are weighed by their box.
+fn visual_marks_weight(doc: &ondin_core::Document, res: &Resolved, members: &[NodeId]) -> usize {
+    let mut weight = 0;
+    let mut under = Vec::new();
+    for &m in members {
+        weight += 1;
+        let by_box = res
+            .used_kind(doc, m)
+            .is_some_and(|k| matches!(k, NodeKind::Artboard { .. } | NodeKind::Text { .. }));
+        if !by_box && let Some(n) = doc.get(m) {
+            under.extend_from_slice(n.children());
+        }
+        while let Some(id) = under.pop() {
+            weight += 1;
+            if weight > VISUAL_MARKS_MAX {
+                return weight;
+            }
+            if let Some(n) = doc.get(id) {
+                under.extend_from_slice(n.children());
+            }
+        }
+        if weight > VISUAL_MARKS_MAX {
+            return weight;
+        }
+    }
+    weight
+}
 
 /// The visual centres the canvas marks, with the document revision, selection
 /// and key layer they were weighed for.
@@ -8248,7 +8280,7 @@ impl OndinApp {
     /// The visual centres of the layers the Align card's centre buttons would move
     /// by weight: the outermost selected, less the key layer, whose centre is the
     /// target. Weighed again only when the document, the selection or its key
-    /// changes, and not at all past [`VISUAL_MARKS_MAX`] layers.
+    /// changes, and not at all past [`VISUAL_MARKS_MAX`] layers to weigh.
     pub(crate) fn visual_centre_marks(&mut self) -> Vec<Point> {
         let rev = self.session.revision();
         let ids = self.session.selection.ids().to_vec();
@@ -8263,7 +8295,7 @@ impl OndinApp {
         let (doc, res) = (&self.session.doc, &self.session.resolved);
         let members = ondin_core::build::outermost(doc, &ids);
         let target = key.filter(|_| members.len() > 1);
-        let marks: Vec<Point> = match members.len() > VISUAL_MARKS_MAX {
+        let marks: Vec<Point> = match visual_marks_weight(doc, res, &members) > VISUAL_MARKS_MAX {
             true => Vec::new(),
             false => members
                 .iter()

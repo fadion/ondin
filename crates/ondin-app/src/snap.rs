@@ -22,7 +22,8 @@ use ondin_core::kurbo::{
 };
 use ondin_core::{Document, NodeId, Resolved};
 
-/// How close (in screen pixels) an edge must come before it snaps.
+/// How close (in screen pixels) an edge must come before it snaps, until Settings
+/// says otherwise ([`crate::prefs::CanvasPrefs::snap_px`]).
 pub(crate) const TOLERANCE_PX: f64 = 6.0;
 
 /// Round to the pixel grid, whose pitch is **one world unit**.
@@ -72,9 +73,24 @@ pub struct Snapping {
     /// turns the screen-space tolerance into world units. A zero zoom would make
     /// the tolerance infinite, so there is no `Default`.
     pub zoom: f64,
+    /// How close, in screen pixels, an edge must come before it snaps — the
+    /// Settings preference, [`TOLERANCE_PX`] by default.
+    pub tolerance_px: f64,
 }
 
 impl Snapping {
+    /// [`Self::tolerance_px`] in world units at this zoom.
+    fn tolerance(&self) -> f64 {
+        self.tolerance_px / self.zoom.max(f64::EPSILON)
+    }
+
+    /// How far, in screen pixels, a point target is marked as near before the
+    /// point snaps to it: four times the snap's reach, so a midpoint can be found
+    /// by eye and then caught.
+    pub fn hint_px(&self) -> f64 {
+        4.0 * self.tolerance_px
+    }
+
     /// Snapping that consults nothing — the base a test adds one source to.
     /// `#[cfg(test)]` so it does not pose as production API.
     #[cfg(test)]
@@ -86,6 +102,7 @@ impl Snapping {
             baselines: Vec::new(),
             pixel: false,
             zoom,
+            tolerance_px: TOLERANCE_PX,
         }
     }
 }
@@ -376,7 +393,7 @@ fn spacing_marks(moved: Rect, sp: Spacing, axis: Axis) -> Vec<Measure> {
 /// A ruler guide wins a tie with a node: the user placed it on purpose, and
 /// preferring it stops a snap flickering between the two.
 pub fn snap_rect(moving: Rect, axes: (bool, bool), s: &Snapping) -> Snap {
-    let tolerance = TOLERANCE_PX / s.zoom.max(f64::EPSILON);
+    let tolerance = s.tolerance();
     let mut snap = Snap::default();
 
     // Candidate features on each axis: near edge, centre, far edge.
@@ -554,11 +571,6 @@ pub struct PointSnap {
     pub hint: Option<PointMark>,
 }
 
-/// How far, in screen pixels, a point target is marked as near before the point
-/// snaps to it: four times the snap's reach, so a midpoint can be found by eye
-/// and then caught.
-pub(crate) const HINT_PX: f64 = 4.0 * TOLERANCE_PX;
-
 /// Snap a dragged **point** — a resize handle, a pen anchor, a node-tool point —
 /// onto nearby features, on the axes it is free to move.
 ///
@@ -570,8 +582,8 @@ pub(crate) const HINT_PX: f64 = 4.0 * TOLERANCE_PX;
 /// first tries to land on [`Snapping::outlines`] ([`point_target`]), exactly and on
 /// both axes at once; failing that, an anchor's x or y lines it up as a box's edge does.
 pub fn snap_point(at: Point, axes: (bool, bool), s: &Snapping) -> PointSnap {
-    let tolerance = TOLERANCE_PX / s.zoom.max(f64::EPSILON);
-    let hint = || point_hint(at, s, HINT_PX / s.zoom.max(f64::EPSILON));
+    let tolerance = s.tolerance();
+    let hint = || point_hint(at, s, s.hint_px() / s.zoom.max(f64::EPSILON));
     if axes == (true, true)
         && let Some(mark) = point_target(at, s, tolerance)
     {
@@ -941,7 +953,7 @@ const CROSSING_BUDGET: usize = 20_000;
 /// rectangles deleted. Only nodes, not other guides: two guides at one coordinate
 /// are a mistake, not a goal.
 pub fn snap_guide(position: f64, axis: Axis, s: &Snapping) -> f64 {
-    let tolerance = TOLERANCE_PX / s.zoom.max(f64::EPSILON);
+    let tolerance = s.tolerance();
     let mut best: Option<(f64, f64)> = None;
     for t in &s.targets {
         let features = match axis {
@@ -1290,6 +1302,33 @@ mod tests {
         Snapping {
             pixel: true,
             ..Snapping::none(zoom)
+        }
+    }
+
+    /// The preference's distance is the reach: ten screen pixels off a guide is
+    /// out of reach at the default and caught at twelve, at any zoom.
+    /// flip: `Snapping::tolerance` reading `TOLERANCE_PX` → fails at "twelve".
+    #[test]
+    fn the_snap_distance_is_the_settings_preference() {
+        for zoom in [0.5, 1.0, 4.0] {
+            let moving = r(100.0, 0.0, 150.0, 50.0) + Vec2::new(10.0 / zoom, 0.0);
+            let near = |px| {
+                snap_rect(
+                    moving,
+                    FREE,
+                    &Snapping {
+                        tolerance_px: px,
+                        ..guides(&[100.0], &[], zoom)
+                    },
+                )
+                .adjust
+                .x
+            };
+            assert_eq!(near(TOLERANCE_PX), 0.0, "default, zoom {zoom}");
+            assert!(
+                (near(12.0) + 10.0 / zoom).abs() < 1e-9,
+                "twelve, zoom {zoom}"
+            );
         }
     }
 

@@ -8,11 +8,15 @@ Part of §9.4.
 
 ### Sources arrive as one value
 
-`snap::Snapping { targets, guides, baselines, pixel, zoom }`, built only in `OndinApp::snapping` and
-taken whole by every snap function.
+`snap::Snapping { targets, guides, baselines, pixel, zoom, tolerance_px }`, built only in
+`OndinApp::snapping` and taken whole by every snap function.
 
 - A switched-off source arrives **empty**, not flagged — an empty list cannot win. `pixel` is the one
   flag (the lattice is everywhere). `zoom` is not `Default`-able (zero zoom = infinite tolerance).
+- The reach is `tolerance_px` screen pixels, Settings ▸ Canvas ▸ *Snap distance*
+  (`CanvasPrefs::snap_px`, 2–16, default `snap::TOLERANCE_PX` = 6), divided by the zoom so a snap is
+  as sticky at every zoom. The point hint reaches four times as far (`Snapping::hint_px`). The pen's
+  tangent snap, the pivot and gradient handles keep their own fixed radii.
 - **The Snap menu is the only way to switch snapping off**; no modifier does. `Snapping::none` is
   `#[cfg(test)]`.
 
@@ -99,7 +103,7 @@ the ring, since there is no anchor there), *Tangent*, *Perpendicular*, *Midpoint
 *On path*. A point is too small for a line to say what it matched.
 
 A target near but not yet caught is **hinted**: `snap::point_hint` finds the nearest of any kind but
-*On path* within `HINT_PX` (four times the snap's reach), and `canvas::draw_snap_hint` marks it with a
+*On path* within `Snapping::hint_px` (four times the snap's reach), and `canvas::draw_snap_hint` marks it with a
 small unnamed square in the same red, so a midpoint or a foot can be found by eye from further off.
 It shows while nothing snapped, and while the point only lies *On path*, since sliding along a path
 is how a midpoint is found; a named snap's ring replaces it. A locked axis gets none.

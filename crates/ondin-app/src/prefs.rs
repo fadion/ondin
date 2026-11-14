@@ -382,12 +382,24 @@ pub struct CanvasPrefs {
     pub grid_adaptive: bool,
     /// The pixel grid's ink while [`Self::grid_adaptive`] is off, straight alpha.
     pub grid_ink: Color,
+    /// How close, in screen pixels, an edge must come before it snaps
+    /// (`snap::Snapping::tolerance_px`); read through [`Self::snap_px`].
+    pub snap_px: u8,
 }
 
 impl CanvasPrefs {
     /// The thinnest and thickest guide the Settings field offers.
     pub const GUIDE_MIN: u8 = 1;
     pub const GUIDE_MAX: u8 = 5;
+    /// The least and most snap distance the Settings field offers: below two a
+    /// snap is near impossible to catch, and past sixteen everything sticks.
+    pub const SNAP_MIN: u8 = 2;
+    pub const SNAP_MAX: u8 = 16;
+
+    /// [`Self::snap_px`] held to its range, whatever the file says.
+    pub fn snap_px(&self) -> u8 {
+        self.snap_px.clamp(Self::SNAP_MIN, Self::SNAP_MAX)
+    }
     /// The grid's fixed ink: a neutral mid-grey at low alpha, which shows on white
     /// and black and on nothing near mid-grey.
     pub const GRID_INK: Color = Color::from_rgba8(128, 128, 128, 60);
@@ -406,6 +418,7 @@ impl Default for CanvasPrefs {
             guide_thickness: 1,
             grid_adaptive: true,
             grid_ink: Self::GRID_INK,
+            snap_px: crate::snap::TOLERANCE_PX as u8,
         }
     }
 }

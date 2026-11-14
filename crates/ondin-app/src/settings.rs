@@ -202,6 +202,7 @@ impl Settings {
         Scrubbed {
             nudge: self.nudge,
             guide_thickness: self.canvas.guide_thickness,
+            snap_px: self.canvas.snap_px,
         }
     }
 
@@ -210,6 +211,7 @@ impl Settings {
     pub(crate) fn restore(&mut self, s: Scrubbed) {
         self.nudge = s.nudge;
         self.canvas.guide_thickness = s.guide_thickness;
+        self.canvas.snap_px = s.snap_px;
     }
 
     /// The theme picked in the form, which the chrome previews while the modal
@@ -287,6 +289,7 @@ impl Settings {
 pub(crate) struct Scrubbed {
     nudge: NudgeStep,
     guide_thickness: u8,
+    snap_px: u8,
 }
 
 /// The settings button's box and glyph on both screens — the editor's
@@ -590,9 +593,11 @@ impl OndinApp {
                         a || b
                     })
                     .inner;
+                section(ui, "Snapping");
+                let snapping = snap_row(ui, &mut draft.canvas);
                 section(ui, "Guides and grid");
                 let guides = self.guide_rows(ui, &mut draft.canvas);
-                nudging || guides
+                nudging || snapping || guides
             }
             SettingsTab::Text => {
                 // No eyebrow: it would only repeat the tab's name.
@@ -1085,6 +1090,38 @@ fn wheel_rows(ui: &mut egui::Ui, canvas: &mut CanvasPrefs) {
         "Ctrl or Alt with the wheel pans instead. A touchpad's two-finger scroll \
          still pans.",
     );
+}
+
+/// The *Snap distance* row, into `canvas`, with its caption. Returns whether it is
+/// being scrubbed.
+fn snap_row(ui: &mut egui::Ui, canvas: &mut CanvasPrefs) -> bool {
+    let mut px = f64::from(canvas.snap_px());
+    let (lo, hi) = (CanvasPrefs::SNAP_MIN, CanvasPrefs::SNAP_MAX);
+    let dragging = labelled_row(ui, "Snap distance", |ui| {
+        let (resp, _) = ui::value_field_suffixed(
+            ui,
+            egui::vec2(PREF_CONTROL_W, FIELD_H),
+            Prefix::Text(""),
+            Some(Suffix {
+                text: "px",
+                clickable: false,
+                tooltip: "",
+            }),
+            &mut px,
+            // As slow as the guide thickness: whole steps.
+            Scrub::whole(0.1).range(f64::from(lo)..=f64::from(hi)),
+            |d| d.custom_formatter(ui::number(0)),
+        );
+        resp.on_hover_text("How near an edge comes before it snaps, on screen")
+            .dragged()
+    });
+    canvas.snap_px = (px.round() as u8).clamp(lo, hi);
+    caption(
+        ui,
+        "Measured on screen, so snapping is as sticky at every zoom. The Snap menu \
+         picks what it snaps to.",
+    );
+    dragging
 }
 
 /// Where the open Settings card keeps each tab's measured height.
@@ -2239,7 +2276,10 @@ mod tests {
         for (tab, headers) in [
             (SettingsTab::General, &["LAYERS", "APPEARANCE"][..]),
             (SettingsTab::Library, &["STORAGE", "LIBRARY", "LAUNCH"]),
-            (SettingsTab::Canvas, &["WHEEL", "NUDGE", "GUIDES AND GRID"]),
+            (
+                SettingsTab::Canvas,
+                &["WHEEL", "NUDGE", "SNAPPING", "GUIDES AND GRID"],
+            ),
             (SettingsTab::Text, &["WEB FONTS"]),
         ] {
             app.settings_tab = tab;
@@ -2458,6 +2498,7 @@ mod tests {
                 guide_thickness: 3,
                 grid_adaptive: false,
                 grid_ink: ondin_core::peniko::Color::from_rgba8(40, 120, 220, 90),
+                snap_px: 10,
             },
             tree_guides: false,
             collapse_groups_on_open: true,
@@ -2822,6 +2863,22 @@ mod tests {
         assert_eq!(app.prefs.reopen_last, want_reopen);
         assert_eq!(app.prefs.theme, ThemePref::Light, "General's theme wins");
         assert!(app.library_settings.is_none(), "the hand-off is spent");
+    }
+
+    /// The saved snap distance is what the canvas snaps with, held to its range.
+    /// flip: `OndinApp::snapping` passing `snap::TOLERANCE_PX` → fails at 12.
+    #[test]
+    fn the_snap_distance_reaches_the_canvas() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        app.prefs.canvas.snap_px = 12;
+        assert_eq!(app.snapping(&[]).tolerance_px, 12.0);
+        app.prefs.canvas.snap_px = 200;
+        assert_eq!(
+            app.snapping(&[]).tolerance_px,
+            f64::from(CanvasPrefs::SNAP_MAX),
+            "a hand-edited file is clamped"
+        );
     }
 
     /// Every tab's label fits inside its own cell of the strip, with room to

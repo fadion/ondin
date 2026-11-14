@@ -4292,6 +4292,7 @@ impl OndinApp {
             },
             pixel: self.snap_grid,
             zoom,
+            tolerance_px: f64::from(self.prefs.canvas.snap_px()),
         }
     }
 
@@ -4311,7 +4312,7 @@ impl OndinApp {
             return s;
         }
         // As far as a hint reaches, which is further than a snap.
-        let reach = snap::HINT_PX / self.points_per_world();
+        let reach = s.hint_px() / self.points_per_world();
         let reach = KRect::from_center_size(near, (2.0 * reach, 2.0 * reach));
         let out = &mut s.outlines;
         let keep = |seg: PathSeg, out: &mut snap::Outlines| {

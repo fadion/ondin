@@ -1392,19 +1392,14 @@ fn write(
     }
     // A move keeps where the layer is drawn, so its place in the new parent is
     // new to the caller, and the next write that places it needs it.
+    // Measured in the parent's own space, as `set`'s `at` places it, so a
+    // rotated or scaled parent answers the place `at` takes back.
     if verb.name == "reparent"
         && let Ok(Some(id)) = node(&args, "node")
-        && let Some(parent) = s.doc.get(id).and_then(|n| n.parent())
-        && let (Some(b), Some(o)) = (
-            reads::bounds_box(s, id).as_array().cloned(),
-            reads::origin(&s.resolved, parent).as_array().cloned(),
-        )
+        && let Some(corner) = box_corner(s, id)
     {
-        let less = |i: usize| {
-            let v = b[i].as_f64().unwrap_or_default() - o[i].as_f64().unwrap_or_default();
-            (v * 10.0).round() / 10.0
-        };
-        answer = json!({ "at": [less(0), less(1)] });
+        let r = |v: f64| (v * 10.0).round() / 10.0;
+        answer = json!({ "at": [r(corner.x), r(corner.y)] });
     }
     Ok(Answer::Json(answer))
 }
@@ -1660,6 +1655,20 @@ fn set(
         ["x", "y"],
         "`at` is [x, y], the left and top of the layer's box in its parent",
     )?;
+    // A layer its container lays out has no place of its own to set; the move
+    // would be dropped and the call read as done.
+    if at.is_some()
+        && let Some(id) = ids
+            .iter()
+            .find(|id| ondin_core::build::is_flex_item(&s.doc, **id))
+    {
+        return Err(format!(
+            "`{}` is placed by its container's layout, so `at`, `x` and `y` cannot move it: \
+             reorder it with `reorder`, or pin it to the frame's sides with `set_insets`, \
+             which takes it out of the layout",
+            id.to_wire()
+        ));
+    }
     let rotation = match props.get("rotation") {
         None => None,
         Some(v) => Some(
@@ -1690,8 +1699,9 @@ fn set(
     let given_colour = canon
         .get("text_style")
         .is_some_and(|st| st.get("color").is_some());
+    // Over every text the fills reach, through groups, as `set_fills` writes.
     if canon.contains_key("fills") && !given_colour {
-        let coloured: Vec<Value> = ids
+        let coloured: Vec<Value> = ondin_core::build::paint_targets(&s.doc, &ids)
             .iter()
             .filter(|id| {
                 s.doc.get(**id).is_some_and(|n| {
@@ -1797,14 +1807,24 @@ fn placed_at(
         .doc
         .get(id)
         .ok_or_else(|| format!("no layer `{}`", id.to_wire()))?;
-    let local = s.resolved.used_local(&s.doc, id).unwrap_or(n.transform());
-    let corner = ondin_core::query::local_box(&s.doc, &s.resolved, id)
-        .map(|b| ondin_core::geometry::transform_rect(local, b).origin())
-        .unwrap_or(local * ondin_core::kurbo::Point::ZERO);
+    let corner = box_corner(s, id).unwrap_or_default();
     let (x, y) = (x.unwrap_or(corner.x), y.unwrap_or(corner.y));
     let moved = ondin_core::kurbo::Affine::translate((x - corner.x, y - corner.y)) * n.transform();
     Ok(json!({ "tool": "set_transform",
         "args": { "node": id.to_wire(), "transform": moved.as_coeffs() } }))
+}
+
+/// The left and top of `id`'s box in its parent's space, where `set`'s `at`
+/// puts it: the box it is drawn with (a group's is its children's) through its
+/// own transform; a layer with no box by its origin.
+fn box_corner(s: &EditorSession, id: NodeId) -> Option<ondin_core::kurbo::Point> {
+    let n = s.doc.get(id)?;
+    let local = s.resolved.used_local(&s.doc, id).unwrap_or(n.transform());
+    Some(
+        ondin_core::query::local_box(&s.doc, &s.resolved, id)
+            .map(|b| ondin_core::geometry::transform_rect(local, b).origin())
+            .unwrap_or(local * ondin_core::kurbo::Point::ZERO),
+    )
 }
 
 /// The `set_size` step that makes `id` `w` wide and `h` high, a side not given
@@ -2464,6 +2484,11 @@ mod tests {
             150.0,
             170.0,
         );
+        let turned = insert(
+            json!({ "Artboard": { "size": { "width": 200, "height": 200 } } }),
+            400.0,
+            100.0,
+        );
         let out = call(
             &mut engine,
             &mut docs,
@@ -2472,6 +2497,100 @@ mod tests {
             json!({ "node": dot, "parent": frame }),
         );
         assert_eq!(ok(&out)["at"], json!([50.0, 70.0]), "{:?}", out.structured);
+
+        // Under a turned parent the answer is in the parent's own space: set
+        // back as `at`, it moves nothing.
+        // flip: the `reparent` arm measuring world box less parent origin →
+        // fails at "moves nothing".
+        let turn = json!({ "nodes": [turned], "props": { "rotation": 90 } });
+        ok(&call(&mut engine, &mut docs, 1, "set", turn));
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "reparent",
+            json!({ "node": dot, "parent": turned }),
+        );
+        let at = ok(&out)["at"].clone();
+        let id = NodeId::from_wire(&dot).unwrap();
+        let before = docs.session.doc.get(id).unwrap().transform();
+        let place = json!({ "nodes": [dot], "props": { "at": at } });
+        ok(&call(&mut engine, &mut docs, 1, "set", place));
+        let after = docs.session.doc.get(id).unwrap().transform();
+        let moved = (after.translation() - before.translation()).hypot();
+        assert!(moved < 0.06, "moves nothing: {moved}");
+    }
+
+    /// `set`'s `at` on a layer its container lays out is refused, naming the
+    /// layout, rather than dropped and answered as done; new fills through a
+    /// group clear the colour of the texts inside it.
+    ///
+    /// flip: `set` without its flex-item refusal → fails at "refused";
+    /// clearing over `ids` alone → fails at "the nested text's colour".
+    #[test]
+    fn set_refuses_a_laid_out_place_and_clears_nested_text_colour() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let page = docs.session.doc.first_page().to_wire();
+        let tree = json!({ "kind": { "Artboard": { "size": { "width": 200, "height": 100 } } },
+            "children": [ { "kind": { "Rect": { "size": { "width": 10, "height": 10 } } } } ] });
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "insert_subtree",
+            json!({ "parent": page, "tree": tree }),
+        );
+        let created = ok(&out)["created"].as_array().unwrap().clone();
+        let (frame, item) = (created[0].clone(), created[1].clone());
+        let display = ondin_core::verbs::example("Display").unwrap();
+        ok(&call(
+            &mut engine,
+            &mut docs,
+            1,
+            "set_display",
+            json!({ "nodes": [frame], "display": display }),
+        ));
+        let item_id = NodeId::from_wire(item.as_str().unwrap()).unwrap();
+        assert!(
+            ondin_core::build::is_flex_item(&docs.session.doc, item_id),
+            "the fixture laid the item out"
+        );
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "set",
+            json!({ "nodes": [item], "props": { "x": 50 } }),
+        );
+        assert!(out.is_error, "refused");
+
+        let text = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "create_text",
+            json!({ "parent": page, "text": "Hi" }),
+        );
+        let text = ok(&text)["created"][0].clone();
+        let style = json!({ "nodes": [text], "style": { "color": "#ff0000" } });
+        ok(&call(&mut engine, &mut docs, 1, "set_text_style", style));
+        let group = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "group",
+            json!({ "nodes": [text] }),
+        );
+        let group = ok(&group)["created"][0].clone();
+        let fills = json!({ "nodes": [group], "props": { "fills": ["#00ff00"] } });
+        ok(&call(&mut engine, &mut docs, 1, "set", fills));
+        let id = NodeId::from_wire(text.as_str().unwrap()).unwrap();
+        let ondin_core::NodeKind::Text { style, .. } = docs.session.doc.get(id).unwrap().kind()
+        else {
+            panic!("not a text");
+        };
+        assert_eq!(style.color, None, "the nested text's colour");
     }
 
     /// Every listed tool that is not a verb reaches a handler: called with the

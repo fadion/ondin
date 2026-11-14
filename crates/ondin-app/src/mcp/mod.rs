@@ -1200,9 +1200,9 @@ fn run(conn: &Connection, s: &mut EditorSession, call: &Call) -> Result<Answer, 
             }
             let png = match id {
                 Some(id) if !is_page(s, id) => {
-                    let r = s
-                        .resolved
-                        .world_bounds(id)
+                    // The box `raster_of` frames: the ink, effects and unclipped
+                    // children included, so `max` bounds what is drawn.
+                    let r = ondin_export::extent(&s.resolved, &[id])
                         .ok_or_else(|| format!("`{}` has no bounds", id.to_wire()))?;
                     let scale = (max / r.width().max(r.height()).max(1.0)).min(2.0);
                     png_viewport("The layer", r, scale, max)?;
@@ -3919,10 +3919,12 @@ mod tests {
     }
 
     /// `export_png` never draws past `max`: a vast region, and a `max` over the
-    /// ceiling, are refused; a layer stops at 2× and a page at 1×.
+    /// ceiling, are refused; a layer stops at 2× and a page at 1×; a layer's
+    /// far shadow counts toward `max`.
     ///
     /// flip: `png_viewport` not checking the pixel size → fails at the vast region
-    /// (or runs out of memory first).
+    /// (or runs out of memory first); the layer arm measuring `world_bounds` →
+    /// fails at "the ink stays within".
     #[test]
     fn export_png_stays_within_max() {
         let (mut engine, mut docs) = (Engine::default(), One::new());
@@ -3950,6 +3952,25 @@ mod tests {
         assert_eq!((w, h), (240, 160), "a 120×80 layer stops at 2×");
         let (w, h) = size(json!({ "max": 4096 }));
         assert_eq!(w, 520, "a page 520 wide stops at 1× ({w}×{h})");
+        // A shadow far off the layer's box is drawn, so `max` counts it.
+        let far = json!({ "nodes": [top], "effects": [{ "kind": "DropShadow", "color": "#000000",
+                          "blur": 4, "offset": [3000, 3000], "spread": 0 }] });
+        ok(&call(&mut engine, &mut docs, 1, "set_effects", far));
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "export_png",
+            json!({ "id": top, "max": 64 }),
+        );
+        let Some(Content::Image { bytes, .. }) = out.content.first() else {
+            panic!("not an image: {:?}", out.content);
+        };
+        let (w, h) = image::load_from_memory(bytes)
+            .unwrap()
+            .to_rgba8()
+            .dimensions();
+        assert!(w.max(h) <= 65, "the ink stays within `max` ({w}×{h})");
     }
 
     /// `run_exports` refuses a document with no settings, then renders a layer's

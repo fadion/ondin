@@ -34,7 +34,7 @@ name (`claude`) and a speaker name (*Claude*) shown on its replies. An unknown s
 | Claude Code | `claude` | one process per conversation, turns as NDJSON on stdin | the process holds the thread; `--resume <id>` after a kill | interrupt control request |
 | Codex | `codex` | one process per turn, prompt on stdin | `exec resume <id>` | kill |
 | Antigravity | `agy` | one process per conversation, NDJSON on stdin | `--conversation <id>` after a kill | kill |
-| OpenCode | `opencode` | one process per turn, prompt as the last argument | `--session <id>` | kill |
+| OpenCode | `opencode` | one process per turn, prompt on stdin | `--session <id>` | kill |
 | GitHub Copilot | `copilot` | one process per turn, prompt on stdin | `--resume=<id>` | kill |
 | Cursor | `cursor-agent` | one process per turn, prompt on stdin | `--resume <id>` | kill |
 | DeepSeek Harness | `dsh` | one process per turn, prompt on stdin | `--session-id <id>` | kill |
@@ -149,7 +149,7 @@ name (`claude`) and a speaker name (*Claude*) shown on its replies. An unknown s
 - **The window must have its endpoint.** A chat refuses to start when the window could not open
   its MCP endpoint, since the chat's level lives in the window's grants.
 - **A command line too long** for the platform is refused before spawning, naming the limit and
-  what made it long (the system prompt riding OpenCode's first message, say).
+  what made it long (the system prompt, where Claude Code's probe found no file flag for it, say).
 
 ## 4. What the agent can see and do
 
@@ -253,8 +253,11 @@ against an eager model, not a boundary against a hostile one. The seal's sentenc
   turn and survives the harness compacting its context; otherwise at the top of the conversation's
   first turn. Claude Code takes it as a file (`--append-system-prompt-file`, falling back to
   `--append-system-prompt` where its probe lacks the flag), keeping it and the replayed
-  conversation off the length-limited, world-readable command line. OpenCode has no file form and
-  takes its prompt as the last argument, so a long one is refused as too long.
+  conversation off the length-limited, world-readable command line. Every per-turn harness,
+  OpenCode included, takes each turn's prompt on stdin, the first turn's carrying the system
+  prompt, so neither is on the command line. OpenCode
+  would also wrap an argument holding a space in quotes, escaping the quotes inside it, before the
+  model saw it.
 - **Each turn opens with a preamble**, fenced as data: the revision; the layers added, changed and
   removed since the last turn, by id and name (forty at most, then how many more); the page; the
   selection; the attached layers; the person's last three questions, since a harness's own memory

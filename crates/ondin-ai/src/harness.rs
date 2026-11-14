@@ -204,11 +204,17 @@ impl Harness {
 
     /// A per-turn harness takes its prompt on stdin rather than as an argument,
     /// which keeps it out of the world-readable command line and out of a
-    /// batch shim's refusal. Each was measured; OpenCode has no stdin form.
+    /// batch shim's refusal. Each was measured. OpenCode appends stdin to its
+    /// argument message, and quotes an argument holding a space before the
+    /// model sees it, so stdin is also the only form that arrives verbatim.
     pub(crate) fn prompt_on_stdin(self) -> bool {
         match self {
-            Harness::Codex | Harness::Copilot | Harness::Cursor | Harness::DeepSeek => true,
-            Harness::Claude | Harness::Antigravity | Harness::OpenCode => false,
+            Harness::Codex
+            | Harness::OpenCode
+            | Harness::Copilot
+            | Harness::Cursor
+            | Harness::DeepSeek => true,
+            Harness::Claude | Harness::Antigravity => false,
         }
     }
 
@@ -1633,13 +1639,21 @@ mod tests {
         assert_eq!(turn_stdin(Harness::Codex, &s).unwrap(), s.prompt);
     }
 
-    /// OpenCode takes the prompt last, as an argument, under the sealed agent.
+    /// OpenCode runs under the sealed agent and takes the system prompt and the
+    /// question on stdin, none of it in the argv.
+    /// flip: `prompt_on_stdin` false for OpenCode → fails at "off the argv".
     #[test]
     fn opencode_turn_argv() {
-        let a = turn_args(Harness::OpenCode, &spec());
+        let s = spec();
+        let a = turn_args(Harness::OpenCode, &s);
         assert_eq!(&a[..4], &["run", "--pure", "--agent", OPENCODE_AGENT]);
-        assert!(a.last().unwrap().ends_with("what is this layer?"));
-        assert!(turn_stdin(Harness::OpenCode, &spec()).is_none());
+        assert!(
+            !a.iter()
+                .any(|x| x.contains(&s.prompt) || x.contains(&s.system)),
+            "off the argv: {a:?}"
+        );
+        let stdin = turn_stdin(Harness::OpenCode, &s).expect("on stdin");
+        assert!(stdin.starts_with(&s.system) && stdin.ends_with(&s.prompt));
     }
 
     /// The prompt travels exactly once, on stdin or in the argv.

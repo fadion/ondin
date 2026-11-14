@@ -665,8 +665,8 @@ impl Inner {
         if total > limit {
             let longest = args.iter().max_by_key(|a| a.len());
             let system = self.base.system.trim();
-            // The system prompt rides with the message on a first turn: it is
-            // the cause when it is most of that argument.
+            // The system prompt is the cause when it is most of the longest
+            // argument (Claude Code's flag, where it has no file form).
             let what = match longest {
                 Some(a)
                     if !system.is_empty() && a.contains(system) && system.len() * 2 > a.len() =>
@@ -1657,8 +1657,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A Windows command line is measured as std quotes it: a message of quote
-    /// marks, short when counted bare, is refused as too long and named.
+    /// A Windows command line is measured as std quotes it: an argument of
+    /// quote marks, short when counted bare, is refused as too long and named.
     /// flip: `quoted_len` counting `"` as one unit → fails at the escaped-quote
     /// assertion, and with that removed at the `TooLong` match.
     #[cfg(windows)]
@@ -1669,11 +1669,8 @@ mod tests {
         assert_eq!(quoted_len(r#"a\"b"#, false), 7);
         assert_eq!(quoted_len(r"a b\", false), 8);
         assert_eq!(quoted_len("5%", true), 12);
-        let (mut s, root) = fake_session(Harness::OpenCode, "codex");
-        let r = s.send(Turn {
-            text: "\"".repeat(20_000),
-            images: Vec::new(),
-        });
+        let (s, root) = fake_session(Harness::Codex, "codex");
+        let r = s.inner.check_argv(&["\"".repeat(20_000)]);
         assert!(
             matches!(
                 r,

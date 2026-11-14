@@ -179,8 +179,19 @@ pub(super) fn check(
 
 /// Apply `p` to `session` as one undo step named by its title, made over MCP so
 /// History marks it as the assistant's. Every call is run against the document
-/// as it is now; the first refusal takes back the rest and is answered.
+/// as it is now; the first refusal takes back the rest and is answered, the
+/// person's redo kept as it was.
 pub(crate) fn apply(session: &mut EditorSession, p: &Proposal) -> Result<Applied, String> {
+    let redo = session.history.take_redo();
+    let applied = apply_calls(session, p);
+    if applied.is_err() {
+        session.history.restore_redo(redo);
+    }
+    applied
+}
+
+/// [`apply`] without the redo kept.
+fn apply_calls(session: &mut EditorSession, p: &Proposal) -> Result<Applied, String> {
     let mark = session.mark();
     let (made, subjects) = match run(session, &p.client, &p.calls) {
         Ok((_, subjects, made)) => (made, subjects),
@@ -430,10 +441,20 @@ mod tests {
             .clone();
         let late = text(&mut engine, &mut docs, "Sign up today");
         let late = NodeId::from_wire(&late).unwrap();
+        // Something of the person's to redo, which a refused apply leaves.
+        let extra = text(&mut engine, &mut docs, "Extra");
+        assert!(docs.session.undo());
         let depth = docs.session.history.undo_depth();
         let why = apply(&mut docs.session, &p).expect_err("refused");
         assert!(why.contains("did not list"), "{why}");
         assert_eq!(docs.session.history.undo_depth(), depth, "nothing changed");
+        // flip: `apply` without its `restore_redo` → fails here.
+        assert_eq!(
+            docs.session.history.redo_depth(),
+            1,
+            "the person's redo is kept"
+        );
+        let _ = extra;
         assert!(matches!(
             docs.session.doc.get(late).unwrap().kind(),
             ondin_core::NodeKind::Text { content, .. } if content == "Sign up today"

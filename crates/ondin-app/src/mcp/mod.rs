@@ -539,6 +539,7 @@ impl Engine {
         let changed = catch_up(conn, session);
         let mark = session.mark();
         let mut proposed = None;
+        let mut held_redo = None;
         let answer = if call.tool == "propose_edit" {
             let title = call.args["title"].as_str().unwrap_or_default();
             propose::calls(&call.args)
@@ -558,6 +559,11 @@ impl Engine {
             actions::run(docs, &path, &call)
         } else if call.tool == "get_view" {
             Ok(Answer::Json(view(session, canvas)))
+        } else if matches!(call.tool.as_str(), "batch" | "set") {
+            // Each step's commit clears the person's redo; one that ends refused,
+            // or lands nothing, gives it back below.
+            held_redo = Some(session.history.take_redo());
+            run(conn, session, &call)
         } else {
             run(conn, session, &call)
         };
@@ -570,6 +576,11 @@ impl Engine {
         // which is what `rewind` checks.
         if answer.is_err() && matches!(call.tool.as_str(), "batch" | "set") {
             session.rewind(&mark);
+        }
+        if let Some(redo) = held_redo
+            && (answer.is_err() || session.revision() == before)
+        {
+            session.history.restore_redo(redo);
         }
         let after = session.revision();
         let mut output = match answer {
@@ -4099,6 +4110,8 @@ mod tests {
         assert_eq!(s.history.undo_depth(), 1, "one step");
         assert_eq!(s.history.done().last().unwrap().note.label, "batch");
 
+        // The person undoes it, so there is a step to redo.
+        assert!(docs.session.undo());
         let layers = docs.session.doc.len();
         let bad = json!({ "tool": "set_name", "args": { "node": "@nobody", "name": "X" } });
         let out = call(
@@ -4111,8 +4124,11 @@ mod tests {
         assert!(out.is_error);
         let s = &docs.session;
         assert_eq!(s.doc.len(), layers, "nothing of a refused batch stays");
-        assert_eq!(s.history.undo_depth(), 1);
-        assert_eq!(s.history.redo_depth(), 0, "and nothing to redo");
+        assert_eq!(s.history.undo_depth(), 0);
+        // flip: `answer` not giving back the redo it held → fails here.
+        assert_eq!(s.history.redo_depth(), 1, "the person's redo is kept");
+        assert!(docs.session.redo(), "and still redoes");
+        assert_eq!(docs.session.doc.get(id).unwrap().name(), "Hero");
     }
 
     /// A batch step can be `set`, naming an earlier step's layer by its label, and

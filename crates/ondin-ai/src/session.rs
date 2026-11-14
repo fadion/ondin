@@ -33,6 +33,7 @@ const INHERITED_ENV_TO_CLEAR: &[&str] = &[
     "OPENCODE_CONFIG",
     "OPENCODE_CONFIG_CONTENT",
     "OPENCODE_CONFIG_DIR",
+    "OPENCODE_PERMISSION",
     "COPILOT_ALLOW_ALL",
     "COPILOT_ASSISTED_APPROVAL",
     "COPILOT_CUSTOM_INSTRUCTIONS_DIRS",
@@ -186,6 +187,9 @@ enum Prep {
     None,
     Antigravity,
     CursorApproval,
+    /// OpenCode merges configuration from places Ondin cannot list, so the
+    /// configuration it resolves is read back before the first turn.
+    OpenCodeCheck,
 }
 
 /// What a session's threads share.
@@ -492,10 +496,18 @@ impl Setup {
                     &dir.join("opencode.json"),
                     harness::opencode_config_json(&exe, args, allowed),
                 )?;
+                // `~/.opencode/opencode.json` is merged over everything else and
+                // no option turns it off; this variable moves only that home,
+                // not the data folder its sign-in lives in.
+                let home = folder.join("opencode-home");
+                mkdir(&home)?;
                 s.env
                     .push(("XDG_CONFIG_HOME".into(), root.into_os_string()));
                 s.env
                     .push(("OPENCODE_DISABLE_PROJECT_CONFIG".into(), "1".into()));
+                s.env
+                    .push(("OPENCODE_TEST_HOME".into(), home.into_os_string()));
+                s.prep = Prep::OpenCodeCheck;
             }
             Harness::Copilot => {
                 mkdir(&work)?;
@@ -742,6 +754,7 @@ impl Inner {
             .map_err(|e| {
                 Refusal::ConfigNotWritten(format!("Cursor did not approve Ondin's server: {e}"))
             }),
+            Prep::OpenCodeCheck => self.opencode_check(),
         };
         self.lock().prepared = Some(result.clone());
         result
@@ -821,6 +834,35 @@ impl Inner {
                 "DeepSeek Harness would still have tools Ondin did not grant ({}), so the turn \
                  was refused.",
                 rows.join(", ")
+            ))),
+        }
+    }
+
+    /// OpenCode's seal, read off the configuration it resolves with the
+    /// session's environment: only Ondin's server, and the agent's tools off.
+    fn opencode_check(&self) -> Result<(), Refusal> {
+        let refuse = |why: String| Refusal::Unsealed {
+            harness: Harness::OpenCode,
+            why,
+        };
+        let mut c = self.command(&self.with_prefix(vec!["debug".into(), "config".into()]));
+        c.stdin(Stdio::null());
+        let out = crate::process::run_bounded(&mut c, Duration::from_secs(30));
+        let text = match out {
+            Ok(Some(h)) if h.status.success() => String::from_utf8_lossy(&h.stdout).into_owned(),
+            _ => String::new(),
+        };
+        match harness::opencode_config_leaks(&text) {
+            None => Err(refuse(
+                "Ondin could not read the configuration OpenCode resolves, so it could not check \
+                 that it is sealed, and did not start it."
+                    .into(),
+            )),
+            Some(leaks) if leaks.is_empty() => Ok(()),
+            Some(leaks) => Err(refuse(format!(
+                "OpenCode's own configuration would still give this session more than Ondin's \
+                 tools ({}), so Ondin did not start it.",
+                leaks.join(", ")
             ))),
         }
     }

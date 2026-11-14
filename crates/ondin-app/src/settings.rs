@@ -203,6 +203,7 @@ impl Settings {
             nudge: self.nudge,
             guide_thickness: self.canvas.guide_thickness,
             snap_px: self.canvas.snap_px,
+            paste_offset: self.canvas.paste_offset,
         }
     }
 
@@ -212,6 +213,7 @@ impl Settings {
         self.nudge = s.nudge;
         self.canvas.guide_thickness = s.guide_thickness;
         self.canvas.snap_px = s.snap_px;
+        self.canvas.paste_offset = s.paste_offset;
     }
 
     /// The theme picked in the form, which the chrome previews while the modal
@@ -290,6 +292,7 @@ pub(crate) struct Scrubbed {
     nudge: NudgeStep,
     guide_thickness: u8,
     snap_px: u8,
+    paste_offset: u16,
 }
 
 /// The settings button's box and glyph on both screens — the editor's
@@ -595,9 +598,11 @@ impl OndinApp {
                     .inner;
                 section(ui, "Snapping");
                 let snapping = snap_row(ui, &mut draft.canvas);
+                section(ui, "Paste");
+                let pasting = paste_row(ui, &mut draft.canvas);
                 section(ui, "Guides and grid");
                 let guides = self.guide_rows(ui, &mut draft.canvas);
-                nudging || snapping || guides
+                nudging || snapping || pasting || guides
             }
             SettingsTab::Text => {
                 // No eyebrow: it would only repeat the tab's name.
@@ -647,26 +652,18 @@ impl OndinApp {
         );
         ui.add_space(ROW_GAP);
         let mut thickness = f64::from(canvas.guide_thickness);
-        let (lo, hi) = (CanvasPrefs::GUIDE_MIN, CanvasPrefs::GUIDE_MAX);
-        let dragging = labelled_row(ui, "Ruler guides thickness", |ui| {
-            let (resp, _) = ui::value_field_suffixed(
-                ui,
-                egui::vec2(PREF_CONTROL_W, FIELD_H),
-                Prefix::Text(""),
-                Some(Suffix {
-                    text: "pt",
-                    clickable: false,
-                    tooltip: "",
-                }),
-                &mut thickness,
-                // As slow as the nudge fields: five whole steps.
-                Scrub::whole(0.1).range(f64::from(lo)..=f64::from(hi)),
-                |d| d.custom_formatter(ui::number(0)),
-            );
-            resp.on_hover_text("How thick a guide is drawn; a selected one is a point thicker")
-                .dragged()
-        });
-        canvas.guide_thickness = (thickness.round() as u8).clamp(lo, hi);
+        let dragging = whole_row(
+            ui,
+            "Ruler guides thickness",
+            "pt",
+            "How thick a guide is drawn; a selected one is a point thicker",
+            &mut thickness,
+            (
+                f64::from(CanvasPrefs::GUIDE_MIN),
+                f64::from(CanvasPrefs::GUIDE_MAX),
+            ),
+        );
+        canvas.guide_thickness = thickness as u8;
         ui.add_space(ROW_GAP);
         if ui::switch_row(ui, "Adaptive pixel grid", canvas.grid_adaptive, SWITCH_H)
             .on_hover_text("Shade the grid from the pixels under it")
@@ -1092,34 +1089,83 @@ fn wheel_rows(ui: &mut egui::Ui, canvas: &mut CanvasPrefs) {
     );
 }
 
-/// The *Snap distance* row, into `canvas`, with its caption. Returns whether it is
-/// being scrubbed.
-fn snap_row(ui: &mut egui::Ui, canvas: &mut CanvasPrefs) -> bool {
-    let mut px = f64::from(canvas.snap_px());
-    let (lo, hi) = (CanvasPrefs::SNAP_MIN, CanvasPrefs::SNAP_MAX);
-    let dragging = labelled_row(ui, "Snap distance", |ui| {
+/// A labelled whole number in the value column, `unit` after it: the guide
+/// thickness, the snap distance, the paste offset. Rounded and held to `lo..=hi`
+/// here as well as by the scrub, which settles a drag and leaves typing alone.
+/// Returns whether it is being scrubbed.
+fn whole_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    unit: &'static str,
+    tooltip: &str,
+    value: &mut f64,
+    (lo, hi): (f64, f64),
+) -> bool {
+    let dragging = labelled_row(ui, label, |ui| {
         let (resp, _) = ui::value_field_suffixed(
             ui,
             egui::vec2(PREF_CONTROL_W, FIELD_H),
             Prefix::Text(""),
             Some(Suffix {
-                text: "px",
+                text: unit,
                 clickable: false,
                 tooltip: "",
             }),
-            &mut px,
-            // As slow as the guide thickness: whole steps.
-            Scrub::whole(0.1).range(f64::from(lo)..=f64::from(hi)),
+            value,
+            // As slow as the nudge fields: whole steps.
+            Scrub::whole(0.1).range(lo..=hi),
             |d| d.custom_formatter(ui::number(0)),
         );
-        resp.on_hover_text("How near an edge comes before it snaps, on screen")
-            .dragged()
+        resp.on_hover_text(tooltip).dragged()
     });
-    canvas.snap_px = (px.round() as u8).clamp(lo, hi);
+    *value = value.round().clamp(lo, hi);
+    dragging
+}
+
+/// The *Snap distance* row, into `canvas`, with its caption. Returns whether it is
+/// being scrubbed.
+fn snap_row(ui: &mut egui::Ui, canvas: &mut CanvasPrefs) -> bool {
+    let mut px = f64::from(canvas.snap_px());
+    let range = (
+        f64::from(CanvasPrefs::SNAP_MIN),
+        f64::from(CanvasPrefs::SNAP_MAX),
+    );
+    let dragging = whole_row(
+        ui,
+        "Snap distance",
+        "px",
+        "How near an edge comes before it snaps, on screen",
+        &mut px,
+        range,
+    );
+    canvas.snap_px = px as u8;
     caption(
         ui,
         "Measured on screen, so snapping is as sticky at every zoom. The Snap menu \
          picks what it snaps to.",
+    );
+    dragging
+}
+
+/// The *Paste offset* row, into `canvas`, with its caption. Returns whether it is
+/// being scrubbed.
+fn paste_row(ui: &mut egui::Ui, canvas: &mut CanvasPrefs) -> bool {
+    let mut px = canvas.paste_offset();
+    let dragging = whole_row(
+        ui,
+        "Paste offset",
+        "px",
+        "How far right and down a pasted copy lands from its original",
+        &mut px,
+        (0.0, f64::from(CanvasPrefs::PASTE_MAX)),
+    );
+    canvas.paste_offset = px as u16;
+    caption(
+        ui,
+        &crate::input::keys(
+            "Ctrl+V places a copy this far from its original; 0 pastes on top of it. \
+             Ctrl+Shift+V always pastes in place.",
+        ),
     );
     dragging
 }
@@ -2278,7 +2324,7 @@ mod tests {
             (SettingsTab::Library, &["STORAGE", "LIBRARY", "LAUNCH"]),
             (
                 SettingsTab::Canvas,
-                &["WHEEL", "NUDGE", "SNAPPING", "GUIDES AND GRID"],
+                &["WHEEL", "NUDGE", "SNAPPING", "PASTE", "GUIDES AND GRID"],
             ),
             (SettingsTab::Text, &["WEB FONTS"]),
         ] {
@@ -2499,6 +2545,7 @@ mod tests {
                 grid_adaptive: false,
                 grid_ink: ondin_core::peniko::Color::from_rgba8(40, 120, 220, 90),
                 snap_px: 10,
+                paste_offset: 0,
             },
             tree_guides: false,
             collapse_groups_on_open: true,

@@ -78,7 +78,9 @@ through the system clipboard), and the hand-kept lists of transient state. Part 
 - **`Ctrl+D` remembers** (`CloneChain`: the last clones, the first one's placement, the step): move
   the duplicates and duplicate again, and the step repeats, for one layer or several (measured on
   the first clone, since a selection moves as one). Duplicating any other set restarts at zero.
-- `Ctrl+V` offsets by 20 on each axis (`PASTE_OFFSET`); `Ctrl+Shift+V` by nothing.
+- `Ctrl+V` offsets by Settings ▸ Canvas ▸ *Paste offset* on each axis (`CanvasPrefs::paste_offset`,
+  0–200, default 20; `OndinApp::paste_offset`), as do *Paste here* with no recorded box and the
+  layers panel's paste beside a row; 0 pastes on top. `Ctrl+Shift+V` offsets by nothing.
 - **Every copy lands one step above its original** (duplicate, paste, Alt-drag), under whatever was
   above it. Paste can name the slot because a captured subtree keeps the original's ids until
   `insert_subtrees` remaps them; if the original is gone or the parent differs, append.

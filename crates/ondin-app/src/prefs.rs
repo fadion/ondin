@@ -385,6 +385,9 @@ pub struct CanvasPrefs {
     /// How close, in screen pixels, an edge must come before it snaps
     /// (`snap::Snapping::tolerance_px`); read through [`Self::snap_px`].
     pub snap_px: u8,
+    /// How far right and down `Ctrl+V` places a copy from its original, in its
+    /// parent's units; 0 pastes on top of it. Read through [`Self::paste_offset`].
+    pub paste_offset: u16,
 }
 
 impl CanvasPrefs {
@@ -399,6 +402,15 @@ impl CanvasPrefs {
     /// [`Self::snap_px`] held to its range, whatever the file says.
     pub fn snap_px(&self) -> u8 {
         self.snap_px.clamp(Self::SNAP_MIN, Self::SNAP_MAX)
+    }
+
+    /// The paste offset a fresh install starts with, and the most the field takes.
+    pub const PASTE_DEFAULT: u16 = 20;
+    pub const PASTE_MAX: u16 = 200;
+
+    /// [`Self::paste_offset`] held to its range, as a distance.
+    pub fn paste_offset(&self) -> f64 {
+        f64::from(self.paste_offset.min(Self::PASTE_MAX))
     }
     /// The grid's fixed ink: a neutral mid-grey at low alpha, which shows on white
     /// and black and on nothing near mid-grey.
@@ -419,6 +431,7 @@ impl Default for CanvasPrefs {
             grid_adaptive: true,
             grid_ink: Self::GRID_INK,
             snap_px: crate::snap::TOLERANCE_PX as u8,
+            paste_offset: Self::PASTE_DEFAULT,
         }
     }
 }

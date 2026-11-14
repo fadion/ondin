@@ -4555,23 +4555,21 @@ impl OndinApp {
 
 // --- clipboard and structure ---------------------------------------------
 
-/// How far a pasted copy sits from its original, in its parent's space.
-const PASTE_OFFSET: Vec2 = Vec2::new(20.0, 20.0);
-
-/// How far a pasted or duplicated **guide** sits from its original, along its one axis:
-/// [`PASTE_OFFSET`]'s single component, so repeated Ctrl+D lays out evenly spaced guides.
-const GUIDE_PASTE_OFFSET: f64 = PASTE_OFFSET.x;
+/// How far a pasted or duplicated **guide** sits from its original, along its one axis,
+/// so repeated Ctrl+D lays out evenly spaced guides. Fixed, not the layers' Settings
+/// offset: that may be 0, and a guide pasted onto itself would be invisible.
+const GUIDE_PASTE_OFFSET: f64 = crate::prefs::CanvasPrefs::PASTE_DEFAULT as f64;
 
 // A copy landing on its original would be invisible; checked at compile time.
 const _: () = assert!(GUIDE_PASTE_OFFSET > 0.0);
 
 /// How far *Paste here* moves the payload: enough to put `from`'s centre on the
-/// pointer, or [`PASTE_OFFSET`] when there is no recorded box. Takes the box, not the
-/// source ids, which are gone after a cut.
-fn paste_aim(from: Option<Rect>, world: Point) -> Vec2 {
+/// pointer, or `fallback` (the paste offset) when there is no recorded box. Takes the
+/// box, not the source ids, which are gone after a cut.
+fn paste_aim(from: Option<Rect>, world: Point, fallback: Vec2) -> Vec2 {
     match from {
         Some(b) => world - b.center(),
-        None => PASTE_OFFSET,
+        None => fallback,
     }
 }
 
@@ -4637,7 +4635,8 @@ impl OndinApp {
         }
         match self.take_clipboard() {
             Clipboard::Layers
-                if self.paste_into_selected_frame(PASTE_OFFSET, true) || self.paste_clipboard() =>
+                if self.paste_into_selected_frame(self.paste_offset(), true)
+                    || self.paste_clipboard() =>
             {
                 return;
             }
@@ -5238,7 +5237,14 @@ impl OndinApp {
 
     /// Returns whether it took the paste, so [`Self::paste`] can fall through to text.
     fn paste_clipboard(&mut self) -> bool {
-        self.paste_clipboard_at(PASTE_OFFSET)
+        self.paste_clipboard_at(self.paste_offset())
+    }
+
+    /// How far a pasted copy sits from its original, in its parent's space: Settings ▸
+    /// Canvas ▸ *Paste offset*, on both axes.
+    pub(crate) fn paste_offset(&self) -> Vec2 {
+        let d = self.prefs.canvas.paste_offset();
+        Vec2::new(d, d)
     }
 
     /// [`Self::paste_clipboard`] with the placement offset spelled out (*Paste here*).
@@ -5463,8 +5469,9 @@ impl OndinApp {
             return false;
         };
         let templates = &clip.subtrees;
+        let offset = self.paste_offset();
         let Some((parent, above)) = crate::canvas::sibling_slot_above(&self.session.doc, id) else {
-            return self.paste_clipboard_at(PASTE_OFFSET);
+            return self.paste_clipboard_at(offset);
         };
         // Every template targets the one slot; `insert_subtrees` advances each past those
         // already inserted, so they keep their order.
@@ -5479,13 +5486,13 @@ impl OndinApp {
         // Same fallback where the component rules refuse the slot (e.g. `m` pasted
         // inside main `m` would be a `ComponentCycle`).
         if !self.paste_is_held(&placements, &clip.images, &clip.kits, &clip.vars.tokens) {
-            return self.paste_clipboard_at(PASTE_OFFSET);
+            return self.paste_clipboard_at(offset);
         }
         // Offset like every other paste: this door decided the *slot*, not the position.
         self.insert_all(
             placements,
             "Pasted",
-            PASTE_OFFSET,
+            offset,
             &clip.images,
             &clip.kits,
             &clip.vars.tokens,
@@ -5514,13 +5521,15 @@ impl OndinApp {
         }
         // The transaction `insert_all` will commit, kit mains included, or a carried instance
         // would be judged detached. A refused carry is `insert_all`'s to report.
+        let offset = self.paste_offset();
+        let doc = &self.session.doc;
         let Ok((tx, _)) = ondin_core::kit::insert_carrying(
             doc,
             &mut self.session.ids,
             kits,
             tokens,
             placements,
-            PASTE_OFFSET,
+            offset,
         ) else {
             return true;
         };
@@ -5540,7 +5549,13 @@ impl OndinApp {
         }
         match self.take_clipboard() {
             // `clipboard_from` is read after the adoption: a foreign copy aims by its own box.
-            Clipboard::Layers if self.paste_clipboard_at(paste_aim(self.clipboard_from, world)) => {
+            Clipboard::Layers
+                if self.paste_clipboard_at(paste_aim(
+                    self.clipboard_from,
+                    world,
+                    self.paste_offset(),
+                )) =>
+            {
                 return;
             }
             Clipboard::Unreadable => return,
@@ -10277,10 +10292,13 @@ mod guide_copy_tests {
         assert_eq!(copy.position, 60.0 + GUIDE_PASTE_OFFSET);
     }
 
-    /// The guide step is `PASTE_OFFSET`'s own component.
+    /// A guide steps by the layers' default paste offset, whatever Settings says.
     #[test]
-    fn a_guide_and_a_layer_step_by_the_same_amount() {
-        assert_eq!(GUIDE_PASTE_OFFSET, PASTE_OFFSET.x);
+    fn a_guide_steps_by_the_default_paste_offset() {
+        assert_eq!(
+            GUIDE_PASTE_OFFSET,
+            crate::prefs::CanvasPrefs::default().paste_offset()
+        );
     }
 
     /// *Paste here* aims from the recorded source box, so it works after a cut; with no
@@ -10292,18 +10310,19 @@ mod guide_copy_tests {
         assert_eq!(from.center(), Point::new(120.0, 50.0));
 
         let pointer = Point::new(300.0, 200.0);
-        let aim = paste_aim(Some(from), pointer);
+        let step = Vec2::new(20.0, 20.0);
+        let aim = paste_aim(Some(from), pointer, step);
         assert_eq!(aim, Vec2::new(180.0, 150.0));
         assert_eq!(from.center() + aim, pointer);
 
         // A pointer inside the source box aims backwards.
         assert_eq!(
-            paste_aim(Some(from), Point::new(110.0, 45.0)),
+            paste_aim(Some(from), Point::new(110.0, 45.0), step),
             Vec2::new(-10.0, -5.0)
         );
 
         // No box: the chord's own step.
-        assert_eq!(paste_aim(None, pointer), PASTE_OFFSET);
+        assert_eq!(paste_aim(None, pointer, step), step);
     }
 
     /// A guide pasted in place keeps its own number. Which caller passes zero is not
@@ -21198,8 +21217,11 @@ mod select_same_tests {
 
 #[cfg(test)]
 mod paste_target_tests {
-    use super::{OndinApp, PASTE_OFFSET};
-    use ondin_core::kurbo::{Affine, Point, Size};
+    use super::OndinApp;
+    use ondin_core::kurbo::{Affine, Point, Size, Vec2};
+
+    /// The default paste offset, which these tests place by.
+    const PASTE_OFFSET: Vec2 = Vec2::new(20.0, 20.0);
     use ondin_core::{IdSource, NodeId, NodeKind, Operation, Transaction};
 
     struct F {
@@ -21283,6 +21305,29 @@ mod paste_target_tests {
             (c - Point::new(600.0, 100.0)).hypot() < 1e-6,
             "centred on the frame: {c:?}"
         );
+    }
+
+    /// The ordinary paste lands the Settings paste offset from its original: 35 to the
+    /// right and down, and on top of it at 0.
+    /// flip: `paste_clipboard` passing a fixed 20 → fails at the 35 case.
+    #[test]
+    fn a_paste_lands_the_settings_offset_away() {
+        for d in [35.0, 0.0] {
+            let F {
+                mut app, ctx, q, ..
+            } = fixture();
+            app.prefs.canvas.paste_offset = d as u16;
+            app.session.selection.set_one(q);
+            app.copy_selection(&ctx);
+            assert!(app.paste_clipboard());
+            let pasted = app.session.selection.single().expect("the paste");
+            assert_ne!(pasted, q, "the fixture: a new layer");
+            let moved = centre(&app, pasted) - centre(&app, q);
+            assert!(
+                (moved - Vec2::new(d, d)).hypot() < 1e-6,
+                "offset {d}: moved {moved:?}"
+            );
+        }
     }
 
     /// The frame a layer was copied from, and a copied frame itself, take the ordinary

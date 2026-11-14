@@ -72,7 +72,8 @@ scoped, copied, drawn and inspected, and the canvas's press-priority ladder. Sna
 - `OndinApp::guide_clipboard: Option<Vec<Guide>>` beside the layer `clipboard`, mutually exclusive by
   hand (every copy clears the other). `property_clipboard` is a third, independent slot.
 - `app::pasted_guide(from, id, owner, step)` is the one placement rule for paste and duplicate: fresh
-  id, axis and colour carried, position stepped by `GUIDE_PASTE_OFFSET` (= `PASTE_OFFSET.x`), or no
+  id, axis and colour carried, position stepped by `GUIDE_PASTE_OFFSET` (a fixed 20, the default paste offset; not the Settings value, which may be 0
+  and would land a guide on itself), or no
   step for paste-in-place. Scope carries; a page-wide guide lands on the current page, and one whose
   frame is gone or on another page falls back to the current page's canvas with its number
   unchanged, and the message says how many. Both counts come from the ops built, not the

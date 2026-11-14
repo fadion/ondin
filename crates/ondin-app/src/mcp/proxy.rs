@@ -32,20 +32,26 @@ trait Hosts {
 const AGENT_NEEDS_WINDOW: &str =
     "Ondin's window is not reachable; an assistant's agent works only through it";
 
+/// The host to connect to among `found` (the window first), `None` to start
+/// `serve`. An assistant's agent acts only through the window, which holds its
+/// chat's grant; `serve` holds none and would let it act unchecked, so for an
+/// agent no window is a refusal.
+fn pick_host(found: Vec<Found>, agent: bool) -> Result<Option<Found>, String> {
+    match found.into_iter().find(|h| !agent || h.host == Host::Window) {
+        Some(h) => Ok(Some(h)),
+        None if agent => Err(AGENT_NEEDS_WINDOW.into()),
+        None => Ok(None),
+    }
+}
+
 /// The hosts this machine runs.
 struct Machine;
 
 impl Hosts for Machine {
     fn connect(&mut self) -> Result<(Host, endpoint::Stream), String> {
-        // An assistant's agent acts only through the window, which holds its
-        // chat's grant; `serve` holds none and would let it act unchecked.
         let agent = std::env::var_os(ondin_ai::AGENT_CHILD_ENV).is_some();
-        let found = endpoint::hosts()
-            .into_iter()
-            .find(|h| !agent || h.host == Host::Window);
-        let found = match found {
+        let found = match pick_host(endpoint::hosts(), agent)? {
             Some(h) => h,
-            None if agent => return Err(AGENT_NEEDS_WINDOW.into()),
             None => start_serve()?,
         };
         let stream =
@@ -440,6 +446,29 @@ fn start_serve() -> Result<Found, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An assistant's agent connects only to the window: never to a `serve`,
+    /// and with no window it is refused rather than starting one; anyone else
+    /// takes the first host, or starts `serve`.
+    /// flip: `pick_host` ignoring `agent` → fails at "never serve".
+    #[test]
+    fn an_agent_reaches_only_the_window() {
+        let host = |pid, host| Found {
+            pid,
+            host,
+            endpoint: std::path::PathBuf::from(format!("e{pid}")),
+        };
+        let serve_only = || vec![host(2, Host::Serve)];
+        assert_eq!(
+            pick_host(serve_only(), false),
+            Ok(Some(host(2, Host::Serve)))
+        );
+        assert!(pick_host(serve_only(), true).is_err(), "never serve");
+        assert!(pick_host(Vec::new(), true).is_err(), "no serve started");
+        assert_eq!(pick_host(Vec::new(), false), Ok(None), "serve started");
+        let both = vec![host(2, Host::Serve), host(1, Host::Window)];
+        assert_eq!(pick_host(both, true), Ok(Some(host(1, Host::Window))));
+    }
 
     /// With a key, `initialize` carries it under the host's `_meta` name beside
     /// whatever `_meta` it had, and with `--tools all` the request for every

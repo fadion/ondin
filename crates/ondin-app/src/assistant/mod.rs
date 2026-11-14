@@ -133,6 +133,8 @@ struct Running {
 
 /// Finding the program, off the UI thread: a probe runs it.
 enum Lookup {
+    /// Settings' text changed at this time; the probe waits for it to settle.
+    Typed(ai::Harness, Option<PathBuf>, std::time::Instant),
     Pending(
         ai::Harness,
         Option<PathBuf>,
@@ -295,6 +297,14 @@ impl Assistant {
     fn end_session(&mut self, why: Option<&str>) {
         if let Some(mut live) = self.live.take() {
             live.session.stop();
+            // The level goes now; the rest of the ending (withdrawing a harness's
+            // registration, a bounded wait) runs off the UI thread.
+            if let Some(g) = &live.grants {
+                g.revoke(&live.key);
+            }
+            let _ = std::thread::Builder::new()
+                .name("assistant-end".into())
+                .spawn(move || drop(live));
         }
         if let Some(r) = self.running.take() {
             if let Some(why) = why {
@@ -413,7 +423,13 @@ impl OndinApp {
     /// thread; `None` while the probe runs.
     fn assistant_lookup(&mut self, h: ai::Harness) -> Option<Result<ai::Found, ai::NotFound>> {
         let over = self.prefs.assistant.program_path();
-        poll_lookup(&mut self.assistant.lookup, &self.egui_ctx, h, over)
+        poll_lookup(
+            &mut self.assistant.lookup,
+            &self.egui_ctx,
+            h,
+            over,
+            std::time::Duration::ZERO,
+        )
     }
 
     /// The program Settings' unsaved `h` and `over` name, looked up off the
@@ -423,22 +439,54 @@ impl OndinApp {
         h: ai::Harness,
         over: Option<PathBuf>,
     ) -> Option<Result<ai::Found, ai::NotFound>> {
-        poll_lookup(&mut self.assistant.settings_lookup, &self.egui_ctx, h, over)
+        poll_lookup(
+            &mut self.assistant.settings_lookup,
+            &self.egui_ctx,
+            h,
+            over,
+            TYPING_QUIET,
+        )
     }
 }
 
+/// How long Settings' Path text must stay unchanged before it is probed: the
+/// probe runs the program, and each half-typed name would run whatever it
+/// names.
+const TYPING_QUIET: std::time::Duration = std::time::Duration::from_millis(700);
+
 /// The lookup in `slot` for `h` and `over`, started afresh when either
-/// differs from the one it holds; `None` while its probe runs.
+/// differs from the one it holds and has stayed so for `quiet`; `None` while
+/// it waits or its probe runs.
 fn poll_lookup(
     slot: &mut Option<Lookup>,
     ctx: &egui::Context,
     h: ai::Harness,
     over: Option<PathBuf>,
+    quiet: std::time::Duration,
 ) -> Option<Result<ai::Found, ai::NotFound>> {
     let stale = match &*slot {
+        Some(Lookup::Typed(lh, lo, since)) if *lh == h && *lo == over => {
+            let left = quiet.saturating_sub(since.elapsed());
+            if !left.is_zero() {
+                ctx.request_repaint_after(left);
+                return None;
+            }
+            true
+        }
+        Some(Lookup::Typed(..)) => {
+            *slot = Some(Lookup::Typed(h, over, std::time::Instant::now()));
+            ctx.request_repaint_after(quiet);
+            return None;
+        }
         Some(Lookup::Pending(lh, lo, _)) | Some(Lookup::Done(lh, lo, _)) => *lh != h || *lo != over,
         None => true,
     };
+    let waited = matches!(slot, Some(Lookup::Typed(..)));
+    if stale && !quiet.is_zero() && !waited && slot.is_some() {
+        *slot = Some(Lookup::Typed(h, over, std::time::Instant::now()));
+        ctx.request_repaint_after(quiet);
+        return None;
+    }
     if stale {
         let (tx, rx) = std::sync::mpsc::channel();
         let ctx = ctx.clone();
@@ -1132,7 +1180,15 @@ impl OndinApp {
             || before.model != now.model
             || before.effort != now.effort
             || before.instructions != now.instructions;
-        if changed && self.assistant.live.is_some() {
+        // A chat on the default access follows it: its grant was given at the
+        // old level, so the session ends rather than keep writing above it.
+        let level = self.assistant_level();
+        let regranted = self
+            .assistant
+            .live
+            .as_ref()
+            .is_some_and(|l| l.started.level != level);
+        if (changed || regranted) && self.assistant.live.is_some() {
             self.assistant
                 .end_session(Some("Stopped: the assistant's settings changed."));
             self.assistant.save();
@@ -1358,6 +1414,36 @@ mod tests {
         assert!(all.contains("14 s · 3.1k tokens"), "{all}");
         assert!(all.contains("Fill"), "the options draw as buttons: {all}");
         assert!(all.contains("The assistant is off"), "{all}");
+    }
+
+    /// Settings' Path text is probed only once it has stayed unchanged for the
+    /// quiet time: each edit restarts the wait, and only a settled text starts
+    /// a lookup.
+    ///
+    /// flip: `poll_lookup` without its `Typed` wait → fails at "a fresh edit
+    /// waits".
+    #[test]
+    fn a_typed_path_is_probed_once_it_settles() {
+        let ctx = egui::Context::default();
+        let h = ai::Harness::ALL[0];
+        let quiet = std::time::Duration::from_secs(60);
+        let (_tx, rx) = std::sync::mpsc::channel();
+        let mut slot = Some(Lookup::Pending(h, None, rx));
+        let typed = |s: &str| Some(PathBuf::from(s));
+        assert!(poll_lookup(&mut slot, &ctx, h, typed("no"), quiet).is_none());
+        assert!(
+            matches!(&slot, Some(Lookup::Typed(_, o, _)) if *o == typed("no")),
+            "a fresh edit waits"
+        );
+        poll_lookup(&mut slot, &ctx, h, typed("notepad"), quiet);
+        assert!(matches!(&slot, Some(Lookup::Typed(_, o, _)) if *o == typed("notepad")));
+        let long_ago = std::time::Instant::now() - quiet * 2;
+        slot = Some(Lookup::Typed(h, typed("missing-program"), long_ago));
+        poll_lookup(&mut slot, &ctx, h, typed("missing-program"), quiet);
+        assert!(
+            matches!(&slot, Some(Lookup::Pending(..) | Lookup::Done(..))),
+            "a settled text is looked up"
+        );
     }
 
     /// When the composer grows (a chip attached, a line broken), the thread's

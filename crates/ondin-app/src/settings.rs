@@ -80,6 +80,10 @@ const STRIP_H: f32 = ui::CONTROL_H;
 /// The least the body is given however short the window, so a few rows always
 /// show.
 const MIN_BODY_H: f32 = 200.0;
+/// The most the body is given, however tall the tallest tab: Assets with every
+/// set and service on runs past it and scrolls, rather than the card standing
+/// that tall over every other tab.
+const MAX_BODY_H: f32 = 520.0;
 /// The value column every labelled row's control fills (a dropdown, a colour row
 /// with its reset, a field), so their left and right edges line up down a tab.
 const PREF_CONTROL_W: f32 = 220.0;
@@ -391,7 +395,8 @@ impl OndinApp {
             let tab = self.settings_tab;
 
             // The body is as tall as the tallest tab, measured as the card opens,
-            // so switching never resizes the card; capped by the window, it scrolls
+            // so switching never resizes the card; capped at `MAX_BODY_H` and by
+            // the window, it scrolls
             // between the strip and the footer, with no bar. ⚠️ Asked as a minimum
             // too: an `Area` hands a scroll area last frame's size, so a maximum
             // alone never grows back.
@@ -401,7 +406,12 @@ impl OndinApp {
                 None => self.measure_tabs(ui, &draft),
             };
             let room = (ctx.content_rect().height() - 2.0 * CARD_EDGE - CHROME_H).max(MIN_BODY_H);
-            let body_h = heights.iter().copied().fold(0.0, f32::max).min(room);
+            let body_h = heights
+                .iter()
+                .copied()
+                .fold(0.0, f32::max)
+                .min(MAX_BODY_H)
+                .min(room);
             let before = draft.scrubbed();
             let body = egui::ScrollArea::vertical()
                 .id_salt(("settings-tab", tab.index()))
@@ -550,11 +560,6 @@ impl OndinApp {
                 if let Some(family) = self.default_font_row(ui, &draft.default_font) {
                     draft.default_font = family;
                 }
-                caption(
-                    ui,
-                    "New text layers start in this font, or in Inter where it is neither \
-                     installed nor downloadable.",
-                );
                 ui.add_space(ROW_GAP);
                 if ui::switch_row(ui, "Check spelling", draft.spell_check, SWITCH_H)
                     .on_hover_text(
@@ -568,21 +573,11 @@ impl OndinApp {
                 if ui::switch_row(ui, "Load web fonts", draft.web_fonts, SWITCH_H).clicked() {
                     draft.web_fonts = !draft.web_fonts;
                 }
-                // A caption rather than a tooltip: the label names a capability, and
-                // "off" is chosen deliberately (metered connection, no CDN), so the
-                // sentence must be read before flipping. "No *font* request" because
-                // the update check is another network source with its own switch.
-                caption(
-                    ui,
-                    "Off is the fonts this machine has installed, plus Inter. \
-                     Nothing is downloaded and no font request is made.",
-                );
                 ui.add_space(ROW_GAP);
                 self.font_cache_row(ui);
                 false
             }
             SettingsTab::Assets => {
-                ui.add_space(TITLE_GAP);
                 self.asset_rows(ui, draft);
                 false
             }
@@ -634,11 +629,6 @@ impl OndinApp {
         {
             canvas.grid_adaptive = !canvas.grid_adaptive;
         }
-        caption(
-            ui,
-            "Each grid line is a shade lighter or darker than the pixel under it, \
-             so the grid shows on any fill.",
-        );
         ui.add_space(ROW_GAP);
         ui.add_enabled_ui(!canvas.grid_adaptive, |ui| {
             self.pref_colour_row(ui, PrefColour::Grid, canvas.grid_ink != defaults.grid_ink);
@@ -775,11 +765,6 @@ impl OndinApp {
     fn asset_rows(&mut self, ui: &mut egui::Ui, draft: &mut Settings) {
         use crate::assets::photos::{PhotoSize, SERVICES};
         use crate::assets::sets::SETS;
-        caption(
-            ui,
-            "Icon sets download once and are kept. Photos are searched online. \
-             Nothing is downloaded until a set or service is on.",
-        );
         section(ui, "Icon sets");
         for (i, spec) in SETS.iter().enumerate() {
             if i > 0 {
@@ -1534,12 +1519,6 @@ impl OndinApp {
     /// *Off*, the rows below the agent are disabled with that reason.
     fn assistant_rows(&mut self, ui: &mut egui::Ui, a: &mut crate::assistant::AssistantPrefs) {
         use crate::assistant::{Level, ai::Harness};
-        caption(
-            ui,
-            "A coding agent you already use and are signed in to, started with only \
-             Ondin's tools. Ondin holds no key and no model.",
-        );
-        ui.add_space(ROW_GAP);
         let picked = a.harness();
         let mut next = picked;
         labelled_row(ui, "Agent", |ui| {
@@ -1587,9 +1566,6 @@ impl OndinApp {
         let on = next;
         // What the choice on screen finds, saved or not; `None` while it looks.
         let lookup = on.and_then(|h| self.assistant_settings_lookup(h, a.program_path()));
-        if let Some(Ok(found)) = &lookup {
-            caption(ui, &found.seal_sentence);
-        }
         // The rows below stay in view, disabled with the reason.
         if on.is_none() {
             caption(
@@ -1683,8 +1659,8 @@ impl OndinApp {
             });
             section(ui, "Instructions");
             // Held at its rows, scrolling past them: the modal keeps its size.
-            let mut area = ui::TextArea::new("Added to every question, after Ondin's own", 4);
-            area.max_rows = 4;
+            let mut area = ui::TextArea::new("Added to every question, after Ondin's own", 6);
+            area.max_rows = 6;
             ui::text_area(ui, &mut a.instructions, area);
         });
     }
@@ -2094,7 +2070,7 @@ mod tests {
                 .fold(widest, f32::max);
             caption = caption.or_else(|| {
                 runs.iter()
-                    .find(|(_, _, t)| t.starts_with("Off is the fonts"))
+                    .find(|(_, _, t)| t.starts_with("Ctrl or Alt with the wheel"))
                     .map(|(_, s, _)| s.y)
             });
         }
@@ -2106,7 +2082,7 @@ mod tests {
         );
 
         // The caption as a height: one line at `CAPTION_PT` is 13pt, so 26 is two.
-        let caption = caption.expect("the web-fonts caption");
+        let caption = caption.expect("the wheel's caption");
         assert!(
             caption <= 27.0,
             "the caption wrapped to {caption:.0}pt, which is more than the two lines \

@@ -137,7 +137,7 @@ the harness allows it, and only Ondin's tools allowed. The mechanism differs per
 sandbox, a rules or permissions file, a config overlay), and each **fails closed**: a harness whose
 restricting config cannot be written, or whose probe cannot confirm its restricting options, is
 refused, not started open. The seal is graded — *Sealed* where built-in tools are off, *Restricted*
-where a sandbox or rules file holds them — and the panel's head and Settings show its sentence
+where a sandbox or rules file holds them — and the panel's head shows its sentence
 (`seal_sentence`), naming the mechanism, saying where a harness cannot keep the person's own MCP
 servers away (Antigravity, Cursor), and, at *Restricted* outside Windows, that the access level is
 a rail rather than a boundary.
@@ -268,8 +268,7 @@ against an eager model, not a boundary against a hostile one. The seal's sentenc
 ## 5. Settings
 
 An **Assistant** tab in Settings, after *Assets* (`app-canvas-chrome.md`, *Settings*), staged
-and written on *Save changes* as the rest is. A caption opens it; the rows follow, then an
-**Instructions** eyebrow over the text area. Stored in prefs (`AssistantPrefs`), per machine; none
+and written on *Save changes* as the rest is. The rows, then an **Instructions** eyebrow over the text area. Stored in prefs (`AssistantPrefs`), per machine; none
 of it is a secret.
 
 - **Agent** — a dropdown, *Off* first. A new install starts off. An unknown saved key loads as off
@@ -282,9 +281,8 @@ of it is a secret.
 - **Effort** — the harness's own levels; hidden where it has none.
 - **Access** — *Look*, *Propose*, *Edit*: the default for a new chat. Each cell's tooltip says
   what the level lets the agent do, in the panel's level menu's words.
-- **Instructions** — free text added to every system prompt (`ui::text_area`), held at its four
+- **Instructions** — free text added to every system prompt (`ui::text_area`), held at its six
   rows and scrolling past them, so the modal keeps its size.
-- The seal's sentence (§4) under the Agent row, for the choice on screen.
 
 With *Off*, a caption says *Off: nothing is started and nothing is sent…* and the rows below Agent
 are disabled. Switching agent clears Path and Model and moves Effort to the nearest level the

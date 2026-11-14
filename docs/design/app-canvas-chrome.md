@@ -422,8 +422,8 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
   | Tab | Rows |
   | --- | --- |
   | **General** | **Layers** (*Show tree guides*, *Collapse groups on open*), **Appearance** (the theme track, *Show resource meter*; the library's Settings shares the theme row only) |
-  | **Canvas** | **Wheel** (*Zoom with the scroll wheel* and its caption, `tools.md` *The wheel*), **Nudge** (*Step*, *Shift*), **Guides and grid** (*Ruler guides colour* and *thickness*, *Adaptive pixel grid* and its caption, *Pixel grid colour*, dimmed with *Turn off Adaptive pixel grid to pick a colour* while adaptive is on; `app-rulers-guides.md`, `prefs::CanvasPrefs`) |
-  | **Text** | no eyebrow, which would repeat the tab's name: *Default font* (the typography panel's family dropdown, its glyph `warn()` with a tooltip when the family is `Missing`, §5.4a) and its caption, *Check spelling*; then **Web fonts** (the switch, its caption, the cache row) |
+  | **Canvas** | **Wheel** (*Zoom with the scroll wheel* and its caption, `tools.md` *The wheel*), **Nudge** (*Step*, *Shift*), **Guides and grid** (*Ruler guides colour* and *thickness*, *Adaptive pixel grid*, *Pixel grid colour*, dimmed with *Turn off Adaptive pixel grid to pick a colour* while adaptive is on; `app-rulers-guides.md`, `prefs::CanvasPrefs`) |
+  | **Text** | no eyebrow, which would repeat the tab's name: *Default font* (the typography panel's family dropdown, its glyph `warn()` with a tooltip when the family is `Missing`, §5.4a), *Check spelling*; then **Web fonts** (the switch, the cache row) |
   | **Assets** | *Assets browser*, below |
   | **Assistant** | `assistant.md` §5 |
 
@@ -444,7 +444,9 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
   gated off under a modal; `ctrl_tab_steps_the_tabs`).
 - The body is one height whichever tab shows (`every_tab_shows_in_one_card`): as the card opens,
   `measure_tabs` lays every tab out once into invisible sizing-pass children on a copy of the form,
-  and the tallest is the body's height, capped by the window's room (never under `MIN_BODY_H`).
+  and the tallest is the body's height, capped at `MAX_BODY_H` (520) and by the window's room
+  (never under `MIN_BODY_H`). Assets with every set and service on runs past the cap and scrolls,
+  so the card does not stand that tall over every other tab.
   A tab that grows while open (a key field shown) grows the card once. Past the cap the body
   scrolls between the strip and the footer, with no bar, each tab at its own offset. ⚠️ The height
   is asked as `min_scrolled_height` too: an `Area` hands a scroll area last frame's size, so a
@@ -1034,7 +1036,7 @@ Open-source icons and stock photos, inserted with their credit (`Node::credit`, 
   box resized so its longer side is the size field's (`edit::resize_to`, as the inspector's W and H
   would, so its layers follow the author's constraints), then centred, as one *Insert icon* step
   with no credit.
-- **Settings ▸ Assets**, its own tab: a caption, then the **Icon sets** eyebrow (the library's icon
+- **Settings ▸ Assets**, its own tab: the **Icon sets** eyebrow (the library's icon
   packs after the remote sets, noted *Kit in your library · v4*) and the **Photos** eyebrow, a
   `ui::switch_row_noted` per set or service noted with its licence or what it needs; under a keyed
   service that is on, its key in `ui::secret_field` and a caption saying where a key is made and

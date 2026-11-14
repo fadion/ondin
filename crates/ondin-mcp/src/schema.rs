@@ -670,7 +670,9 @@ pub fn class(name: &str) -> Class {
         || crate::tools::ASSISTANT.contains(&name)
     {
         Class::Read
-    } else if OUTSIDE_UNDO.contains(&name) {
+    } else if OUTSIDE_UNDO.contains(&name) || name == "call" {
+        // `call` runs whichever tool it names, the unlisted outside-undo ones
+        // among them, so a client's consent for those must cover it too.
         Class::OutsideUndo
     } else {
         Class::Write
@@ -856,6 +858,11 @@ mod tests {
         }
         assert_eq!(class("publish_kit"), Class::OutsideUndo);
         assert_eq!(class("delete_node"), Class::Write);
+        // `call` reaches `publish_kit` and the rest, so it is marked as they are.
+        assert_eq!(
+            definition("call").unwrap()["annotations"]["destructiveHint"],
+            true
+        );
     }
 
     /// The bytes `tools/list` sends, every phase's definitions as compact JSON.

@@ -23,6 +23,8 @@ pub(crate) enum Block {
     Heading(Vec<Span>),
     List {
         ordered: bool,
+        /// An ordered list's first number, as written.
+        start: u32,
         items: Vec<Vec<Span>>,
     },
     Code {
@@ -111,9 +113,26 @@ pub(crate) fn parse(src: &str) -> Vec<Block> {
         }
         if let Some(ordered) = list_marker(t) {
             flush(&mut para, &mut out);
+            let start = t
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect::<String>()
+                .parse()
+                .unwrap_or(1);
             let mut items: Vec<String> = Vec::new();
             while i < lines.len() {
                 let l = lines[i].trim();
+                // A blank line between two items keeps one (loose) list.
+                let next_item = || {
+                    lines[i + 1..]
+                        .iter()
+                        .find(|l| !l.trim().is_empty())
+                        .is_some_and(|l| list_marker(l.trim()) == Some(ordered))
+                };
+                if l.is_empty() && !items.is_empty() && next_item() {
+                    i += 1;
+                    continue;
+                }
                 match list_marker(l) {
                     Some(o) if o == ordered => items.push(strip_marker(l).to_owned()),
                     // A wrapped item's next line, indented under it.
@@ -128,6 +147,7 @@ pub(crate) fn parse(src: &str) -> Vec<Block> {
             }
             out.push(Block::List {
                 ordered,
+                start,
                 items: items.iter().map(|s| inline(s)).collect(),
             });
             continue;
@@ -292,13 +312,17 @@ pub(crate) fn show(ui: &mut egui::Ui, blocks: &[Block], look: &Look<'_>, acts: &
         match b {
             Block::Para(spans) => spans_row(ui, spans, look, acts, false),
             Block::Heading(spans) => spans_row(ui, spans, look, acts, true),
-            Block::List { ordered, items } => {
+            Block::List {
+                ordered,
+                start,
+                items,
+            } => {
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 3.0;
                     for (k, item) in items.iter().enumerate() {
                         ui.horizontal_top(|ui| {
                             let mark = match ordered {
-                                true => format!("{}.", k + 1),
+                                true => format!("{}.", u64::from(*start) + k as u64),
                                 false => "•".to_owned(),
                             };
                             ui.add_sized(
@@ -480,7 +504,7 @@ mod tests {
         let b = parse(src);
         assert_eq!(b.len(), 5, "{b:?}");
         assert!(matches!(&b[1], Block::Table { rows, .. } if rows.len() == 1));
-        assert!(matches!(&b[2], Block::List { ordered: false, items } if items.len() == 2));
+        assert!(matches!(&b[2], Block::List { ordered: false, items, .. } if items.len() == 2));
         assert!(matches!(&b[3], Block::Code { lang, .. } if lang == "css"));
     }
 
@@ -554,5 +578,22 @@ mod tests {
             ],
             "the actor is hex"
         );
+    }
+
+    /// A loose ordered list, its items parted by blank lines, is one list, and
+    /// a list that starts at 3 counts from 3.
+    /// flip: `parse` without its blank-line continuation → fails at "one list".
+    #[test]
+    fn a_loose_list_is_one_list_numbered_as_written() {
+        let b = parse("1. Pick\n\n2. Place\n\n3. Check");
+        assert_eq!(b.len(), 1, "one list: {b:?}");
+        assert!(
+            matches!(&b[0], Block::List { ordered: true, start: 1, items } if items.len() == 3)
+        );
+        let b = parse("3. Third\n4. Fourth");
+        assert!(matches!(&b[0], Block::List { start: 3, .. }), "{b:?}");
+        // A blank line before a paragraph still ends the list.
+        let b = parse("- a\n\nAfter");
+        assert_eq!(b.len(), 2, "{b:?}");
     }
 }

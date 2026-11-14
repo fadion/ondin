@@ -986,6 +986,15 @@ const GHOST_ALPHA: f32 = 0.3;
 /// past this many the diamonds are a field nobody reads.
 pub(crate) const VISUAL_MARKS_MAX: usize = 100;
 
+/// The visual centres the canvas marks, with the document revision, selection
+/// and key layer they were weighed for.
+pub(crate) struct VisualMarks {
+    rev: u64,
+    ids: Vec<NodeId>,
+    key: Option<NodeId>,
+    marks: Vec<Point>,
+}
+
 /// A component set's tab's padding round its text.
 const SET_TAB_PAD: egui::Vec2 = egui::vec2(6.0, 3.0);
 
@@ -8244,12 +8253,12 @@ impl OndinApp {
         let rev = self.session.revision();
         let ids = self.session.selection.ids().to_vec();
         let key = self.session.selection.key();
-        if let Some((r, held, k, marks)) = &self.visual_marks
-            && *r == rev
-            && *held == ids
-            && *k == key
+        if let Some(m) = &self.visual_marks
+            && m.rev == rev
+            && m.ids == ids
+            && m.key == key
         {
-            return marks.clone();
+            return m.marks.clone();
         }
         let (doc, res) = (&self.session.doc, &self.session.resolved);
         let members = ondin_core::build::outermost(doc, &ids);
@@ -8263,7 +8272,12 @@ impl OndinApp {
                 .map(|c| c.at())
                 .collect(),
         };
-        self.visual_marks = Some((rev, ids, key, marks.clone()));
+        self.visual_marks = Some(VisualMarks {
+            rev,
+            ids,
+            key,
+            marks: marks.clone(),
+        });
         marks
     }
 

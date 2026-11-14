@@ -1222,10 +1222,9 @@ pub struct OndinApp {
     /// ([`ondin_core::centroid`]). Off at every launch and never saved: a mode left on
     /// from yesterday is one nobody remembers when things stop aligning as expected.
     pub(crate) align_visual: bool,
-    /// The visual centres the canvas marks while [`Self::align_visual`] is on, with
-    /// the document revision, selection and key layer they were weighed for:
+    /// The visual centres the canvas marks while [`Self::align_visual`] is on:
     /// weighing unions every layer's ink, too slow to redo each frame.
-    pub(crate) visual_marks: Option<(u64, Vec<NodeId>, Option<NodeId>, Vec<Point>)>,
+    pub(crate) visual_marks: Option<crate::canvas::VisualMarks>,
     /// The four *Snap* menu toggles, read only by [`OndinApp::snapping`].
     pub(crate) snap_shapes: bool,
     pub(crate) snap_guides: bool,

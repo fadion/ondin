@@ -189,9 +189,11 @@ link map:
 
 - A gained child is copied in at its anchor, down the copy chain, each node linked one level up,
   against a per-parent child list simulated as inserts land.
-- A lost child takes a counterpart only where `untouched` — every field but locks equal, same linked
-  children in the same order recursively, no local additions; a deleted counterpart is a lost child
-  for its own copies.
+- A lost child takes a counterpart only where `untouched` — every field a propagated operation writes
+  equal (locks and component bookkeeping are not compared), same linked children in the same order
+  recursively, no local additions; a deleted counterpart is a lost child for its own copies.
+  `untouched` destructures `Node` with no `..`, so a new field does not build until its author says
+  whether a copy differing by it is touched.
 - Reorders go down the copy chain; the pass lays every linked child of each copy in the main's new
   order in the linked slots.
 - No arm acts on a copy the edit itself deleted. No gained child is copied into a copy holding a

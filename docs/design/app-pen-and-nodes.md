@@ -376,8 +376,9 @@ selected without the node tool. Every corner rounds; a radius on a smooth anchor
 A command, not a mode (`ondin_core::pixel_fit`, its status line in the app's `pixel_fit`): it
 moves a layer's edges onto the pixel grid once, so a 16–24px icon renders crisp at 1×. The grid is
 world units: `pixel_fit::fit` is `fit_on` with the identity, and `fit_on` fits onto the grid a
-scale and a translation map whole units of, which an icon export uses on a copy for each size's
-pixels (`export.md`, *Icon files*). Its doors are the layer menu's Structure row (`OndinApp::pixel_fit`, over the
+scale and a translation map whole units of. An icon export fits a copy onto each size's pixels
+through `fit_copy_on`, which fits locked layers too: a lock keeps the person's edits off a layer,
+and the copy is no one's edit (`export.md`, *Icon files*). Its doors are the layer menu's Structure row (`OndinApp::pixel_fit`, over the
 selection; `context-menus.md` §4), the palette, the path bar's button (`pixel_fit_points`, above)
 and the `pixel_fit` verb; no chord. Its glyph is `icon::PIXEL_FIT`, an arrow
 pushing a square's corner, not `GRID_FOUR`, which is the View menu's grid.

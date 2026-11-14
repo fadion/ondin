@@ -225,7 +225,8 @@ against an eager model, not a boundary against a hostile one. The seal's sentenc
     and marked as the assistant's (`Origin::Mcp`): the person applies it, the agent wrote it. It
     is refused, with nothing changed, when the calls now reach a layer the card did not list,
     other than ones they create (a `replace_text` with no `nodes` meeting a layer added since):
-    *The proposal now also changes `<name>`, which it did not list.*
+    *The proposal now also changes `<name>`, which it did not list.* A refused Apply keeps the
+    person's redo (`propose::apply`).
   - **`<layer> changed after this was proposed`**, in the warning colour, with *Ask again*, which
     asks *`<name>` changed. Propose again.* with the proposal's written layers that still exist
     attached.

@@ -66,11 +66,12 @@ const NO_UI: &[&str] = &["egui", "eframe", "emath", "ecolor", "epaint", "winit"]
 const RULES: &[(&str, &[&str])] = &[
     // Invariant 1 / §3: core is headless.
     ("ondin-core", HEADLESS),
-    // §3: "`ondin-mcp` contains no rendering or UI dependency." An unused
-    // `ondin-export` edge once broke this by pulling in vello, wgpu and naga.
+    // §3: "`ondin-mcp` declares no `ondin-export` dependency; it contains no
+    // rendering or UI dependency." An `ondin-export` edge pulls in vello, wgpu
+    // and naga.
     ("ondin-mcp", HEADLESS),
-    // §3: "Only `ondin-app` may depend on egui/winit" — the two crates that sit
-    // between core and the app and could quietly acquire chrome.
+    // §3: "Only `ondin-app` may depend on `egui`/`winit`." These are the two
+    // crates between core and the app that could quietly acquire chrome.
     ("ondin-render", NO_UI),
     ("ondin-export", NO_UI),
     // The harness layer drives child processes and parses their streams; no

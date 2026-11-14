@@ -82,7 +82,7 @@ ondin/
 └─ crates/
    ├─ ondin-core/            # headless engine: model, ops, history, resolve, text layout, io
    ├─ ondin-render/          # ScenePainter + Vello GPU impl + vello_cpu impl
-   ├─ ondin-export/          # SVG, PDF, PNG, JPEG, WebP, JSON snapshot; code export (HTML/CSS, React, Vue); export plan and zip
+   ├─ ondin-export/          # SVG, PDF, PNG, JPEG, WebP, JSON snapshot; code export (HTML/CSS, React, Vue); export plan and zip; the agent's page reads (`context`)
    ├─ ondin-mcp/             # MCP adapter: the wire, the tool table and schemas, the queue
    ├─ ondin-ai/              # the assistant's agent harnesses: find, seal, spawn, decode
    └─ ondin-app/             # `ondin` binary: GUI shell, tools, panels, `serve`/`export` subcommands

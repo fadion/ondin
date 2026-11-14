@@ -381,6 +381,7 @@ impl Engine {
     /// holds no grant for (a chat of an earlier run, or one ended long ago) is
     /// refused rather than answered as an ungranted client's.
     pub(crate) fn handle(&mut self, docs: &mut impl Documents, mut call: Call) -> Output {
+        parse_json_text(&mut call);
         let Some((key, level)) = self.grants.resolve(call.key.as_deref(), call.pid) else {
             if call
                 .key
@@ -428,7 +429,7 @@ impl Engine {
             call.tool = tool.to_owned();
             call.args = args;
         }
-        if let Err(why) = check_call(&mut call) {
+        if let Err(why) = check_call(&call) {
             return Output::error(why);
         }
         // Ids start from the launch's time, so a card saved in a thread before
@@ -670,31 +671,13 @@ fn host_font(docs: &mut impl Documents, args: &mut Value) -> Result<(), String> 
 /// Refuse a tool no host serves, before anything else, and a table tool's
 /// arguments as a verb's are refused: unknown, missing or of the wrong kind. A
 /// `"12"` for a `since` read as absent answered in full without a word.
-fn check_call(call: &mut Call) -> Result<(), String> {
+fn check_call(call: &Call) -> Result<(), String> {
     if ondin_core::verbs::find(&call.tool).is_some() {
         return Ok(());
     }
     let Some(tool) = ondin_mcp::schema::tool(&call.tool) else {
         return Err(no_such_tool(&call.tool));
     };
-    // A model parameter some clients send as JSON text reaches the handler
-    // parsed, as the check reads it; a verb's own `Args` does the same.
-    if let Some(map) = call.args.as_object_mut() {
-        for p in tool.params {
-            let ondin_core::verbs::ParamKind::Model(model) = p.kind else {
-                continue;
-            };
-            if matches!(model, "PropValue" | "DtcgFile") {
-                continue;
-            }
-            if let Some(Value::String(s)) = map.get(p.name)
-                && let Ok(parsed) = serde_json::from_str::<Value>(s.trim())
-                && (parsed.is_object() || parsed.is_array())
-            {
-                map.insert(p.name.to_owned(), parsed);
-            }
-        }
-    }
     let mut args = call.args.clone();
     // An empty selection clears it, where a layer list elsewhere needs one.
     if tool.name == "set_selection" && call.args.get("ids") == Some(&json!([])) {
@@ -709,6 +692,48 @@ fn check_call(call: &mut Call) -> Result<(), String> {
     ondin_core::verbs::check_args(tool.name, tool.params, &args)
         .map(|_| ())
         .map_err(|e| e.to_string())
+}
+
+/// Parse the model parameters some clients send as JSON text, `call`'s own
+/// `args` among them, so the level check and the handler read what the agent
+/// meant; a verb's own `Args` does the same.
+fn parse_json_text(call: &mut Call) {
+    let parse = |map: &mut serde_json::Map<String, Value>, name: &str| {
+        if let Some(Value::String(s)) = map.get(name)
+            && let Ok(parsed) = serde_json::from_str::<Value>(s.trim())
+            && (parsed.is_object() || parsed.is_array())
+        {
+            map.insert(name.to_owned(), parsed);
+        }
+    };
+    let (tool, args) = if call.tool == "call" {
+        let Some(map) = call.args.as_object_mut() else {
+            return;
+        };
+        parse(map, "args");
+        let Some(tool) = map.get("tool").and_then(Value::as_str).map(str::to_owned) else {
+            return;
+        };
+        let Some(args) = map.get_mut("args") else {
+            return;
+        };
+        (tool, args)
+    } else {
+        (call.tool.clone(), &mut call.args)
+    };
+    if ondin_core::verbs::find(&tool).is_some() {
+        return;
+    }
+    let (Some(tool), Some(map)) = (ondin_mcp::schema::tool(&tool), args.as_object_mut()) else {
+        return;
+    };
+    for p in tool.params {
+        if let ondin_core::verbs::ParamKind::Model(model) = p.kind
+            && !matches!(model, "PropValue" | "DtcgFile")
+        {
+            parse(map, p.name);
+        }
+    }
 }
 
 /// Remember a look at `rev`, with the layers `others` changed or removed since
@@ -2952,9 +2977,11 @@ mod tests {
     }
 
     /// A table tool's model argument sent as JSON text is read as the structure
-    /// it holds, by the handler as well as the check.
+    /// it holds, by the handler as well as the check, and so is `call`'s own
+    /// `args`.
     ///
-    /// flip: `check_call` not writing the parsed value back → fails at "props".
+    /// flip: `parse_json_text` leaving `call`'s `args` as text → fails at
+    /// "call's args".
     #[test]
     fn json_text_arguments_reach_the_handler_parsed() {
         let (mut engine, mut docs) = (Engine::default(), One::new());
@@ -2980,6 +3007,30 @@ mod tests {
             json!({ "names": names }),
         );
         assert_eq!(ok(&out)["tools"][0]["name"], "set_point", "names");
+        // `call`'s own `args` as JSON text, and a model argument inside it.
+        let args = json!({ "node": id, "name": "Renamed" }).to_string();
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "call",
+            json!({ "tool": "set_name", "args": args }),
+        );
+        ok(&out);
+        assert_eq!(
+            docs.session.doc.get(node).unwrap().name(),
+            "Renamed",
+            "call's args"
+        );
+        let args = json!({ "names": json!(["set"]).to_string() }).to_string();
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "call",
+            json!({ "tool": "describe_tools", "args": args }),
+        );
+        assert_eq!(ok(&out)["tools"][0]["name"], "set", "nested");
     }
 
     /// A delete with a stale `base_rev` is refused when a layer inside what it

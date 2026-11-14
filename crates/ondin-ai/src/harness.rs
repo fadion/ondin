@@ -412,8 +412,10 @@ pub(crate) fn seal_from_help(h: Harness, help: &str) -> Seal {
         // `--tools ""` empties the built-in set; without it a denylist stands in.
         Harness::Claude if has("--tools") => Seal::Sealed,
         Harness::Claude => Seal::Restricted,
-        // A sandbox: the agent's own readers stay live.
-        Harness::Codex | Harness::Antigravity if has("--sandbox") => Seal::Restricted,
+        // A sandbox: the agent's own readers stay live. Antigravity's needs its
+        // plan mode too, which is what refuses its writes and commands.
+        Harness::Codex if has("--sandbox") => Seal::Restricted,
+        Harness::Antigravity if has("--sandbox") && has("--mode") => Seal::Restricted,
         // The seal is a config file and `--help` cannot show it; `--pure` is
         // passed every turn and marks the build the mechanism was measured on.
         Harness::OpenCode if has("--pure") => Seal::Sealed,
@@ -654,7 +656,9 @@ pub(crate) fn session_args(h: Harness, spec: &TurnSpec, flags: ClaudeFlags) -> V
         }
         Harness::Antigravity => {
             // No `-p`: it takes the prompt as its value and would read the next
-            // flag as the prompt.
+            // flag as the prompt. `--mode plan` is the seal: `--sandbox` alone
+            // restricts its terminal, yet in a folder the person trusts (their
+            // home, say) its own tools still write files and run commands.
             let mut a: Vec<String> = [
                 "--input-format",
                 "stream-json",
@@ -662,6 +666,8 @@ pub(crate) fn session_args(h: Harness, spec: &TurnSpec, flags: ClaudeFlags) -> V
                 "stream-json",
                 "--sandbox",
                 "--disable-slash-commands",
+                "--mode",
+                "plan",
             ]
             .map(String::from)
             .to_vec();
@@ -1457,6 +1463,21 @@ mod tests {
         assert!(!turn_args(Harness::OpenCode, &s).contains(&"--variant".to_string()));
         let a = session_args(Harness::Antigravity, &s, ClaudeFlags::ALL);
         assert!(!a.contains(&"--effort".to_string()));
+    }
+
+    /// Antigravity runs in plan mode, and a build without it is not sealed.
+    /// flip: `session_args` without `--mode plan` → fails at `plan mode`.
+    #[test]
+    fn antigravity_runs_in_plan_mode() {
+        let a = session_args(Harness::Antigravity, &spec(), ClaudeFlags::ALL);
+        assert!(
+            a.windows(2).any(|w| w[0] == "--mode" && w[1] == "plan"),
+            "plan mode"
+        );
+        let old = "  --sandbox    Run in a sandbox\n  -h, --help";
+        assert_eq!(seal_from_help(Harness::Antigravity, old), Seal::Unknown);
+        let new = "  --mode    Set the mode\n  --sandbox    Run in a sandbox\n  -h, --help";
+        assert_eq!(seal_from_help(Harness::Antigravity, new), Seal::Restricted);
     }
 
     const CLAUDE_HELP: &str = "\

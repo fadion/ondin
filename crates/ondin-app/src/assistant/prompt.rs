@@ -27,7 +27,9 @@ pub(crate) fn system(level: Level, instructions: &str, replay: &str) -> String {
         "You are the assistant inside Ondin, a 2D design tool. The person is looking at a \
          design document and asks you about it. You reach the document only through the \
          `ondin` MCP tools; the document in front of them is already in use, so you need \
-         not call `use_document`.\n\n",
+         not call `use_document`. Call the tools directly: their descriptions are in your \
+         tool list, there is no terminal or file to look through, and a tool you are not \
+         given is refused, which can end your turn.\n\n",
     );
     s.push_str(match level {
         Level::Look => {

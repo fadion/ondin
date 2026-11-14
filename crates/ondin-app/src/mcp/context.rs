@@ -121,6 +121,17 @@ fn frame_box(doc: &Document, res: &Resolved, id: NodeId) -> Option<Rect> {
     ))
 }
 
+/// `id`'s own box in world space, its stroke left out, as `set`'s `at` places it
+/// and `get_outline` reads it; its world box when it has no own box.
+fn own_box(doc: &Document, res: &Resolved, id: NodeId) -> Option<Rect> {
+    ondin_core::local_box(doc, res, id)
+        .and_then(|b| {
+            let w = res.world_transform(id)?;
+            Some(ondin_core::geometry::transform_rect(w, b))
+        })
+        .or_else(|| res.world_bounds(id))
+}
+
 /// The layers under `root` that can be seen, `root` first, in document order:
 /// a hidden layer's subtree and a mask, which draws nothing, are passed over.
 fn shown_under(doc: &Document, root: NodeId) -> Vec<NodeId> {
@@ -461,7 +472,8 @@ fn design_context(s: &EditorSession, args: &Value) -> Result<Value, String> {
     Ok(answer)
 }
 
-/// `root`'s shown children as sections (name, id, world box), and the content
+/// `root`'s shown children as sections (name, id, own box in world space, as
+/// [`own_box`] reads it), and the content
 /// column: the most common left and right edge, rounded to whole units, of
 /// what the sections hold. A section's children are its content, less any
 /// child spanning the section's whole width, a background; a section with no
@@ -479,7 +491,7 @@ fn sections_and_column(doc: &Document, res: &Resolved, root: NodeId) -> (Vec<Val
         if !doc.shown(c) || cn.mask() {
             continue;
         }
-        let Some(b) = res.world_bounds(c) else {
+        let Some(b) = own_box(doc, res, c) else {
             continue;
         };
         if sections.len() < SECTIONS {
@@ -490,7 +502,7 @@ fn sections_and_column(doc: &Document, res: &Resolved, root: NodeId) -> (Vec<Val
             if !doc.shown(k) || doc.get(k).is_some_and(|n| n.mask()) {
                 continue;
             }
-            let Some(kb) = res.world_bounds(k) else {
+            let Some(kb) = own_box(doc, res, k) else {
                 continue;
             };
             if kb.x0 <= sb.x0 + SLACK && kb.x1 >= sb.x1 - SLACK {
@@ -543,7 +555,7 @@ fn gaps(doc: &Document, res: &Resolved, root: NodeId) -> Vec<Value> {
             if !doc.shown(c) || n.mask() {
                 return None;
             }
-            let b = res.world_bounds(c)?;
+            let b = own_box(doc, res, c)?;
             (!whole.is_some_and(|w| !passes(w, b))).then_some((n.name(), b))
         })
         .collect();
@@ -790,6 +802,16 @@ fn draws_nothing(doc: &Document, id: NodeId, kind: &NodeKind, laid_out: bool) ->
     !filled && !stroked
 }
 
+/// Whether layer `id` has a visible stroke of width that puts ink down.
+fn stroked(doc: &Document, id: NodeId) -> bool {
+    doc.get(id).is_some_and(|n| {
+        doc.resolved_paint(id, n.paint())
+            .strokes
+            .iter()
+            .any(|st| st.visible && st.width > 0.0 && inks(st.brush.drawn()))
+    })
+}
+
 /// Whether layer `id` has a visible fill that puts ink down.
 fn filled(doc: &Document, id: NodeId) -> bool {
     doc.get(id).is_some_and(|n| {
@@ -824,11 +846,88 @@ fn decoration(doc: &Document, id: NodeId, kind: &NodeKind) -> bool {
         })
 }
 
-/// Whether text box `t` and box `b` share more than a sliver: over 2 units
-/// across and a quarter of the text's height.
-fn covers(t: Rect, b: Rect) -> bool {
-    let x = t.intersect(b);
+/// Whether `id`'s world transform keeps its box square to the page.
+fn square(res: &Resolved, id: NodeId) -> bool {
+    res.world_transform(id)
+        .is_some_and(|w| w.as_coeffs()[1].abs() < 1e-9 && w.as_coeffs()[2].abs() < 1e-9)
+}
+
+/// `r`'s corners, clockwise on screen from the top left.
+fn rect_corners(r: Rect) -> [Point; 4] {
+    [
+        Point::new(r.x0, r.y0),
+        Point::new(r.x1, r.y0),
+        Point::new(r.x1, r.y1),
+        Point::new(r.x0, r.y1),
+    ]
+}
+
+/// The outline a sibling lint compares `id` by, in world space: its world box
+/// `b` when it is square to the page, else its own box through its turn.
+fn outline(doc: &Document, res: &Resolved, id: NodeId, b: Rect) -> [Point; 4] {
+    if square(res, id) {
+        return rect_corners(b);
+    }
+    match (ondin_core::local_box(doc, res, id), res.world_transform(id)) {
+        (Some(own), Some(w)) => rect_corners(own).map(|p| w * p),
+        _ => rect_corners(b),
+    }
+}
+
+/// Whether `p` lies inside the convex `quad`, or within `slack` of it.
+fn inside(quad: &[Point; 4], p: Point, slack: f64) -> bool {
+    let sign = winding(quad);
+    (0..4).all(|i| {
+        let (a, b) = (quad[i], quad[(i + 1) % 4]);
+        let edge = b - a;
+        let len = edge.hypot();
+        len < 1e-12 || sign * edge.cross(p - a) / len >= -slack
+    })
+}
+
+/// Whether text box `t` and the convex `quad` share more than a sliver: the
+/// part of `t` inside `quad` over 2 units across and a quarter of the text's
+/// height, measured by its box.
+fn covers_shape(t: Rect, quad: &[Point; 4]) -> bool {
+    // Sutherland–Hodgman: the text's box cut by each of the quad's edges.
+    let sign = winding(quad);
+    let mut poly: Vec<Point> = rect_corners(t).to_vec();
+    for i in 0..4 {
+        let (a, b) = (quad[i], quad[(i + 1) % 4]);
+        if (b - a).hypot() < 1e-12 {
+            continue;
+        }
+        let side = |x: Point| sign * (b - a).cross(x - a);
+        let mut next = Vec::new();
+        for j in 0..poly.len() {
+            let (p, q) = (poly[j], poly[(j + 1) % poly.len()]);
+            let (sp, sq) = (side(p), side(q));
+            if sp >= 0.0 {
+                next.push(p);
+            }
+            if (sp >= 0.0) != (sq >= 0.0) {
+                next.push(p + (q - p) * (sp / (sp - sq)));
+            }
+        }
+        poly = next;
+        if poly.is_empty() {
+            return false;
+        }
+    }
+    let x = poly
+        .iter()
+        .fold(Rect::new(f64::MAX, f64::MAX, f64::MIN, f64::MIN), |r, p| {
+            Rect::new(r.x0.min(p.x), r.y0.min(p.y), r.x1.max(p.x), r.y1.max(p.y))
+        });
     x.width() > 2.0 && x.height() > 0.25 * t.height()
+}
+
+/// `quad`'s winding: 1 one way round, -1 the other.
+fn winding(quad: &[Point; 4]) -> f64 {
+    let area: f64 = (0..4)
+        .map(|i| quad[i].to_vec2().cross(quad[(i + 1) % 4].to_vec2()))
+        .sum();
+    if area < 0.0 { -1.0 } else { 1.0 }
 }
 
 /// The characters of `content` no face of `runs` has, which draw as empty
@@ -866,23 +965,26 @@ fn missing_chars(content: &str, runs: &[ondin_core::text::GlyphRun]) -> Vec<char
 /// nearest filled sibling under it that holds its centre (`text_spill`), as a
 /// label leaving its button does. Siblings only: a layer elsewhere in the tree
 /// is not compared.
+/// A turned or skewed layer is compared by its own outline, not its world box;
+/// a turned text is not compared, as `text_overlap` does not compare one.
 fn sibling_lints(doc: &Document, res: &Resolved, children: &[NodeId], issues: &mut Vec<Value>) {
-    let laid: Vec<(NodeId, Rect, bool, bool)> = children
+    let laid: Vec<(NodeId, Rect, [Point; 4], bool, bool)> = children
         .iter()
         .filter(|c| doc.shown(**c) && doc.get(**c).is_some_and(|n| !n.mask()))
         .filter_map(|&c| {
             let b = res.world_bounds(c)?;
             let text = matches!(res.used_kind(doc, c)?, NodeKind::Text { .. });
-            Some((c, b, text, !text && filled(doc, c)))
+            let shape = outline(doc, res, c, b);
+            Some((c, b, shape, text, !text && filled(doc, c)))
         })
         .collect();
-    for (i, &(t, tb, is_text, _)) in laid.iter().enumerate() {
-        if !is_text {
+    for (i, &(t, tb, _, is_text, _)) in laid.iter().enumerate() {
+        if !is_text || !square(res, t) {
             continue;
         }
         if let Some(&(c, ..)) = laid[i + 1..]
             .iter()
-            .find(|(_, b, _, filled)| *filled && covers(tb, *b))
+            .find(|(_, _, shape, _, filled)| *filled && covers_shape(tb, shape))
         {
             issues.push(issue(
                 "text_covered",
@@ -891,11 +993,11 @@ fn sibling_lints(doc: &Document, res: &Resolved, children: &[NodeId], issues: &m
             ));
             continue;
         }
-        if let Some(&(g, gb, ..)) = laid[..i]
+        if let Some(&(g, _, ground, ..)) = laid[..i]
             .iter()
             .rev()
-            .find(|(_, b, _, filled)| *filled && b.contains(tb.center()))
-            && passes(tb, gb)
+            .find(|(_, _, shape, _, filled)| *filled && inside(shape, tb.center(), 0.0))
+            && rect_corners(tb).iter().any(|p| !inside(&ground, *p, SLACK))
         {
             issues.push(issue(
                 "text_spill",
@@ -964,14 +1066,30 @@ fn check_layout(s: &EditorSession, args: &Value) -> Result<Value, String> {
         walk(doc, res, root, above, &mut issues, &mut texts, &mut checked);
     }
     // Two texts overlap when their boxes share more than a sliver: over 2
-    // units across and a quarter of the shorter one's height.
-    for (i, (a, ab)) in texts.iter().enumerate() {
-        for (b, bb) in &texts[i + 1..] {
-            let x = ab.intersect(*bb);
+    // units across and a quarter of the shorter one's height. Swept by left
+    // edge, so texts apart across are not compared; past the cap a pair is
+    // only counted.
+    let mut uncounted = 0;
+    let mut order: Vec<usize> = (0..texts.len()).collect();
+    order.sort_by(|i, j| texts[*i].1.x0.total_cmp(&texts[*j].1.x0));
+    for (k, &i) in order.iter().enumerate() {
+        let ab = texts[i].1;
+        for &j in &order[k + 1..] {
+            let bb = texts[j].1;
+            if bb.x0 >= ab.x1 - 2.0 {
+                break;
+            }
+            let x = ab.intersect(bb);
             if x.width() > 2.0 && x.height() > 0.25 * ab.height().min(bb.height()) {
+                if issues.len() >= ISSUES {
+                    uncounted += 1;
+                    continue;
+                }
+                // The pair in document order.
+                let (a, b) = (texts[i.min(j)].0, texts[i.max(j)].0);
                 issues.push(issue(
                     "text_overlap",
-                    &[*a, *b],
+                    &[a, b],
                     format!(
                         "Two texts overlap by {} × {}.",
                         r2(x.width()),
@@ -981,7 +1099,7 @@ fn check_layout(s: &EditorSession, args: &Value) -> Result<Value, String> {
             }
         }
     }
-    let more = issues.len().saturating_sub(ISSUES);
+    let more = issues.len().saturating_sub(ISSUES) + uncounted;
     issues.truncate(ISSUES);
     let mut answer = json!({ "issues": issues, "checked": checked });
     if more > 0 {
@@ -1011,12 +1129,16 @@ fn walk(
     if !page && !matches!(kind, NodeKind::Slice { .. }) {
         *checked += 1;
         let one = |code: &str, message: String| issue(code, &[id], message);
+        // A box flat on one side still draws as a line when it is stroked.
         if let Some(size) = match kind {
             NodeKind::Text { .. } => res.text_layout(id).map(|l| l.size),
             NodeKind::Line { .. } | NodeKind::Arc { .. } | NodeKind::Spiral { .. } => None,
             k => k.box_size(),
-        } && (size.width <= 0.01 || size.height <= 0.01)
-        {
+        } && match (size.width <= 0.01, size.height <= 0.01) {
+            (true, true) => true,
+            (false, false) => false,
+            _ => !stroked(doc, id),
+        } {
             issues.push(one(
                 "zero_size",
                 format!(
@@ -1697,5 +1819,104 @@ mod tests {
         ]
         .map(|(c, n)| (c.to_owned(), n.to_owned()));
         assert_eq!(found(&s), want);
+    }
+
+    /// A box flat on one side but stroked draws a line and is not `zero_size`;
+    /// unstroked, or flat on both sides, it is.
+    ///
+    /// flip: `walk` firing on one flat side whatever the stroke → fails at the
+    /// codes, which gain `zero_size` for "Divider".
+    #[test]
+    fn a_stroked_flat_box_is_a_line_not_zero_size() {
+        let (s, _) = with(json!({
+            "kind": frame(300.0, 300.0), "name": "Card", "fills": fill(255, 255, 255),
+            "children": [
+                { "kind": rect(100.0, 0.0, 0.0), "name": "Divider", "transform": at(10.0, 50.0), "strokes": stroke(2.0) },
+                { "kind": rect(100.0, 0.0, 0.0), "name": "Flat", "transform": at(10.0, 100.0) },
+                { "kind": rect(0.0, 0.0, 0.0), "name": "Dot", "transform": at(10.0, 150.0), "strokes": stroke(2.0) },
+            ],
+        }));
+        let want = [("zero_size", "Dot"), ("zero_size", "Flat")]
+            .map(|(c, n)| (c.to_owned(), n.to_owned()));
+        assert_eq!(found(&s), want);
+    }
+
+    /// A filled diamond whose world box reaches a text, but whose outline does
+    /// not, neither covers the text nor holds it; a square one in the same box
+    /// does cover it.
+    ///
+    /// flip: `sibling_lints` comparing by world box (`outline` answering
+    /// `rect_corners(b)` always) → fails at the codes, which gain `text_covered`.
+    #[test]
+    fn a_turned_neighbour_is_compared_by_its_outline() {
+        let turn = |x: f64, y: f64| {
+            json!(
+                Affine::translate((x, y))
+                    * Affine::rotate(std::f64::consts::FRAC_PI_4)
+                    * Affine::translate((-20.0, -20.0))
+            )
+        };
+        let (s, _) = with(json!({
+            "kind": frame(300.0, 300.0), "name": "Card", "fills": fill(255, 255, 255),
+            "children": [
+                { "kind": text("Words", 16.0, 400, TextSizing::Auto, BlockStyle::default()), "name": "Words", "transform": at(10.0, 10.0) },
+                { "kind": rect(40.0, 40.0, 0.0), "name": "Diamond", "transform": turn(83.4, 48.0), "fills": fill(9, 9, 9) },
+            ],
+        }));
+        let card = s.doc.get(s.page).unwrap().children()[0];
+        let kids = s.doc.get(card).unwrap().children().to_vec();
+        let (tb, db) = (
+            s.resolved.world_bounds(kids[0]).unwrap(),
+            s.resolved.world_bounds(kids[1]).unwrap(),
+        );
+        assert!(
+            tb.intersect(db).width() > 2.0 && tb.intersect(db).height() > 0.25 * tb.height(),
+            "the fixture: the boxes overlap, {tb:?} {db:?}"
+        );
+        assert_eq!(found(&s), Vec::<(String, String)>::new());
+    }
+
+    /// `design_context`'s section boxes leave the stroke out, so a child's box
+    /// less the root's origin is its position, as `get_outline` and `set` read it.
+    ///
+    /// flip: `sections_and_column` reading `world_bounds` → fails at the box,
+    /// which grows by the stroke.
+    #[test]
+    fn design_context_boxes_leave_the_stroke_out() {
+        let (s, _) = with(json!({
+            "kind": frame(400.0, 300.0), "name": "Card", "transform": at(100.0, 100.0),
+            "children": [
+                { "kind": rect(50.0, 50.0, 0.0), "name": "Box", "transform": at(20.0, 30.0),
+                  "fills": fill(9, 9, 9), "strokes": stroke(8.0) },
+            ],
+        }));
+        let out = design_context(&s, &json!({})).unwrap();
+        assert_eq!(out["root"]["origin"], json!([100, 100]), "{out}");
+        assert_eq!(
+            out["sections"][0]["box"],
+            json!([120.0, 130.0, 50.0, 50.0]),
+            "{out}"
+        );
+    }
+
+    /// Many stacked texts answer [`ISSUES`] overlaps and count the rest in
+    /// `more`, without building an issue for each pair.
+    ///
+    /// flip: the sweep breaking at `bb.x0 >= ab.x0` → fails at the issue count.
+    /// The cap's saving in time is not asserted.
+    #[test]
+    fn stacked_texts_answer_the_cap_and_count_the_rest() {
+        let n = 200;
+        let children: Vec<Value> = (0..n)
+            .map(|_| json!({ "kind": text("Stacked", 16.0, 400, TextSizing::Auto, BlockStyle::default()), "name": "T", "transform": at(10.0, 10.0) }))
+            .collect();
+        let (s, _) = with(json!({
+            "kind": frame(300.0, 300.0), "name": "Card", "fills": fill(255, 255, 255),
+            "children": children,
+        }));
+        let out = check_layout(&s, &json!({})).unwrap();
+        assert_eq!(out["issues"].as_array().unwrap().len(), ISSUES);
+        let pairs = n * (n - 1) / 2;
+        assert_eq!(out["more"], json!(pairs - ISSUES), "every pair counted");
     }
 }

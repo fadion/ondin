@@ -2194,6 +2194,8 @@ impl OndinApp {
             self.palette = None;
             // So is present mode, and the fullscreen it took.
             self.stop_presenting(ui.ctx());
+            // No size preview renders behind the library.
+            self.size_preview.drop_copy();
             self.dashboard_ui(ui);
             self.cheatsheet_ui(ui.ctx());
             // Last of the library's frame, after every card (the editor's twin is at

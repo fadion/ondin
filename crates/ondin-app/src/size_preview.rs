@@ -112,6 +112,14 @@ pub(crate) struct SizePreview {
 }
 
 impl SizePreview {
+    /// Let go of the document copy and image store the renders share, once no
+    /// render will follow: the card hidden, the library in front or the tab
+    /// left. A copy of a large page holds its whole node table and images.
+    pub(crate) fn drop_copy(&mut self) {
+        self.taken = None;
+        self.store = None;
+    }
+
     /// Pin `ids`, as the head's pin does (tests only).
     #[cfg(test)]
     pub(crate) fn pin_selection(&mut self, ids: &[NodeId]) {
@@ -396,6 +404,7 @@ impl OndinApp {
             // from it.
             self.size_preview.slots.clear();
             self.size_preview.slots_at = None;
+            self.size_preview.drop_copy();
             return;
         }
         let prefs = self.prefs.size_preview.clone();
@@ -889,6 +898,25 @@ mod tests {
         pass(&ctx, &mut app, Vec::new());
         settle(&ctx, &mut app);
         assert_eq!(sides(&app), [vec![16, 20, 24, 32, 48]], "pixels on");
+    }
+
+    /// The renders' document copy is let go once the card is hidden and once the
+    /// library comes to the front.
+    /// flip: `size_preview_ui`'s hidden branch keeping the copy → fails at "hidden".
+    #[test]
+    fn the_copy_is_let_go_when_no_render_follows() {
+        let ctx = egui::Context::default();
+        let (mut app, _) = app_with_preview(&ctx);
+        assert!(app.size_preview.taken.is_some(), "the fixture rendered");
+        app.show_size_preview = false;
+        pass(&ctx, &mut app, Vec::new());
+        assert!(app.size_preview.taken.is_none(), "hidden");
+        app.show_size_preview = true;
+        let copy = (app.session.doc.clone(), app.session.resolved.clone());
+        app.size_preview.taken = Some((app.session.revision(), Arc::new(copy)));
+        app.view = crate::app::View::Dashboard;
+        pass(&ctx, &mut app, Vec::new());
+        assert!(app.size_preview.taken.is_none(), "behind the library");
     }
 
     /// Pinned, the card keeps its layer when the selection moves on; once the

@@ -522,6 +522,8 @@ impl OndinApp {
         self.chart_data = None;
         self.chart_import = None;
         self.chart_read = None;
+        // The size preview's copy is of this document.
+        self.size_preview.drop_copy();
         self.open_menu = crate::app::TopMenu::None;
         self.context_menu = None;
         self.palette = None;

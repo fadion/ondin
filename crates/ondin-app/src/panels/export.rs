@@ -164,7 +164,8 @@ pub(crate) struct ExportPreview {
     summary: String,
     /// An icon file's sizes being drawn on a worker: each size copies and
     /// resolves the whole document, a tenth of a second on a large page with
-    /// *Pixel-fit*. The tiles shown meanwhile are the last ones drawn.
+    /// *Pixel-fit*. One runs at a time, a newer key waiting for it to land, and
+    /// the tiles shown meanwhile are the layer's last ones drawn.
     icons_job: Option<crate::job::Job<Option<IconsBuilt>>>,
 }
 
@@ -173,6 +174,39 @@ pub(crate) struct ExportPreview {
 pub(crate) struct IconsBuilt {
     tiles: Vec<(u32, Vec<u8>, bool)>,
     bytes: usize,
+}
+
+/// *Export frames as one PDF*'s file: a page per entry of `pages`, drawn from
+/// the copy every export draws from, frames' fills left out as asked
+/// (`plan::for_export`).
+fn frames_pdf(
+    doc: &ondin_core::Document,
+    res: &ondin_core::Resolved,
+    pages: &[(String, Vec<NodeId>)],
+) -> Option<ondin_export::pdf::Export> {
+    let roots: Vec<NodeId> = pages
+        .iter()
+        .flat_map(|(_, ids)| ids.iter().copied())
+        .collect();
+    let stripped = ondin_export::plan::for_export(doc, &roots);
+    let (doc, res) = match &stripped {
+        Some((d, r)) => (d, r),
+        None => (doc, res),
+    };
+    ondin_export::pdf::pdf_pages(doc, res, pages, ondin_core::ExportText::Live)
+}
+
+/// The copy an icon file of `node` is drawn from, owned: frames' fills left out
+/// as asked, an icon's own size frames' too (`plan::drawn_roots`), as
+/// `plan::render` draws it. Run on the preview's worker, its faces registered.
+fn icon_copy(
+    doc: ondin_core::Document,
+    res: ondin_core::Resolved,
+    node: NodeId,
+    spec: &ExportSpec,
+) -> (ondin_core::Document, ondin_core::Resolved) {
+    let roots = ondin_export::plan::drawn_roots(&doc, &res, node, spec);
+    ondin_export::plan::for_export(&doc, &roots).unwrap_or((doc, res))
 }
 
 /// Take `p`'s icon tiles from their worker once they are drawn: a texture a
@@ -662,13 +696,25 @@ impl OndinApp {
                 spec: spec.clone(),
                 revision: self.session.revision(),
             };
-            if self.export_preview.as_ref().map(|p| &p.key) != Some(&key) {
-                self.export_preview = self.build_export_preview(ui.ctx(), key);
-            }
             if let Some(p) = &mut self.export_preview {
                 land_icons(ui.ctx(), p);
             }
-            let Some(preview) = &self.export_preview else {
+            let stale = self.export_preview.as_ref().map(|p| &p.key) != Some(&key);
+            // One icon worker at a time: a newer key waits for the one in flight,
+            // whose landing repaints, rather than leave it drawing for nobody.
+            let in_flight = self
+                .export_preview
+                .as_ref()
+                .is_some_and(|p| p.icons_job.is_some());
+            if stale && !(key.spec.format.is_icon() && in_flight) {
+                self.export_preview = self.build_export_preview(ui.ctx(), key);
+            }
+            // Another layer's tiles, while its worker finishes, are not this one's.
+            let Some(preview) = self
+                .export_preview
+                .as_ref()
+                .filter(|p| p.key.node == subject)
+            else {
                 return;
             };
             if !preview.icons.is_empty() {
@@ -723,24 +769,16 @@ impl OndinApp {
         ctx: &egui::Context,
         key: PreviewKey,
     ) -> Option<ExportPreview> {
-        let (doc, res) = (&self.session.doc, &self.session.resolved);
-        // The copy the file is drawn from, frames' fills left out as asked: an
-        // icon's own size frames' too, as `plan::render` draws it.
-        let roots = ondin_export::plan::drawn_roots(doc, res, key.node, &key.spec);
-        let stripped = ondin_export::plan::for_export(doc, &roots);
-        let (doc, res) = match &stripped {
-            Some((d, r)) => (d, r),
-            None => (doc, res),
-        };
-        // A slice previews its box of the page, as its file is (`plan::render`).
-        let region = ondin_export::plan::slice_region(doc, res, key.node);
         if key.spec.format.is_icon() {
-            let (doc, res) = (doc.clone(), res.clone());
+            // Everything past the copy is the worker's: leaving a fill out clones
+            // and resolves the whole document again.
+            let (doc, res) = (self.session.doc.clone(), self.session.resolved.clone());
             let (node, spec) = (key.node, key.spec.clone());
             let job = crate::job::Job::spawn("ondin-icon-preview", ctx, move || {
                 // This thread's text engine holds Inter alone until it is given
-                // the document's faces; each size lays its copy out again.
+                // the document's faces; the strip and each size lay text out again.
                 ondin_core::text::register_font_data(&res.text_fonts());
+                let (doc, res) = icon_copy(doc, res, node, &spec);
                 let entries = ondin_export::icon::entries(&doc, &res, node, &spec)?;
                 let bytes =
                     ondin_export::icon::encode(spec.format, &entries).map_or(0, |b| b.len());
@@ -750,11 +788,12 @@ impl OndinApp {
                     .collect();
                 Some(IconsBuilt { tiles, bytes })
             });
-            // The same row a revision on keeps its tiles until the new ones land.
+            // The same layer keeps its tiles until the new ones land, a revision
+            // or a setting on, so the section does not empty and grow back.
             let (icons, summary) = self
                 .export_preview
                 .as_mut()
-                .filter(|p| p.key.node == key.node && p.key.spec == key.spec)
+                .filter(|p| p.key.node == key.node)
                 .map(|p| (std::mem::take(&mut p.icons), std::mem::take(&mut p.summary)))
                 .unwrap_or_default();
             return Some(ExportPreview {
@@ -771,6 +810,16 @@ impl OndinApp {
         if !key.spec.format.is_raster() {
             return None;
         }
+        let (doc, res) = (&self.session.doc, &self.session.resolved);
+        // The copy the file is drawn from, frames' fills left out as asked.
+        let roots = ondin_export::plan::drawn_roots(doc, res, key.node, &key.spec);
+        let stripped = ondin_export::plan::for_export(doc, &roots);
+        let (doc, res) = match &stripped {
+            Some((d, r)) => (d, r),
+            None => (doc, res),
+        };
+        // A slice previews its box of the page, as its file is (`plan::render`).
+        let region = ondin_export::plan::slice_region(doc, res, key.node);
 
         let (size, clamped) = ondin_export::plan::raster_size(doc, res, key.node, &key.spec);
         let (w, h) = size?;
@@ -2663,19 +2712,7 @@ impl OndinApp {
             if cancel.cancelled() {
                 return Delivered::cancelled();
             }
-            // Drawn from the copy every export draws from, frames' fills left out
-            // as asked (`plan::for_export`).
-            let roots: Vec<NodeId> = pages
-                .iter()
-                .flat_map(|(_, ids)| ids.iter().copied())
-                .collect();
-            let stripped = ondin_export::plan::for_export(&doc, &roots);
-            let (doc, resolved) = match &stripped {
-                Some((d, r)) => (d, r),
-                None => (&doc, &resolved),
-            };
-            let made =
-                ondin_export::pdf::pdf_pages(doc, resolved, &pages, ondin_core::ExportText::Live);
+            let made = frames_pdf(&doc, &resolved, &pages);
             turn.wait();
             if !cancel.begin_write() {
                 return Delivered::cancelled();
@@ -5469,6 +5506,233 @@ mod code_export_tests {
             .icon_sizes();
         assert_eq!(now, [16, 32, 48, 256], "256 is ticked");
         assert_eq!(app.export_row_open, Some(0), "the card stays open");
+    }
+
+    /// Run frames until the icon worker in flight lands.
+    fn land(ctx: &egui::Context, app: &mut crate::app::OndinApp) {
+        for _ in 0..400 {
+            crate::repeat::tests::pass(ctx, app, Vec::new());
+            if app
+                .export_preview
+                .as_ref()
+                .is_some_and(|p| p.icons_job.is_none())
+            {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        panic!("the icon preview never landed");
+    }
+
+    /// An open ICO preview starts no second worker while one is in flight: edits
+    /// and a changed setting wait for it, its tiles staying up. Once it lands the
+    /// newest key is drawn, and a changed setting keeps the last tiles up until
+    /// its own land.
+    ///
+    /// flip: the Preview section rebuilding whatever is in flight → fails at "no
+    /// second worker". flip: `build_export_preview` carrying tiles over only for
+    /// the same spec → fails at "the last tiles stay up".
+    #[test]
+    fn an_icon_preview_runs_one_worker_and_keeps_its_tiles_up() {
+        let ctx = egui::Context::default();
+        let (mut app, frame) = svg_settings_app(&ctx);
+        let ico = ExportSpec::new(ExportFormat::Ico, ExportScale::Times(1.0));
+        let set = |app: &mut crate::app::OndinApp, sizes: Vec<u32>| {
+            let spec = ExportSpec {
+                sizes,
+                ..ico.clone()
+            };
+            assert!(app.session.commit(Transaction(vec![Operation::SetExports {
+                id: frame,
+                exports: ondin_core::keyed_by_position([spec]),
+            }])));
+        };
+        set(&mut app, vec![16, 32, 48]);
+        app.collapsed_panels.remove(PREVIEW);
+        land(&ctx, &mut app);
+        let preview = |app: &crate::app::OndinApp| {
+            let p = app.export_preview.as_ref().expect("a preview");
+            (p.key.revision, p.icons.len(), p.icons_job.is_some())
+        };
+        let (landed_at, tiles, _) = preview(&app);
+        assert_eq!(tiles, 3, "the fixture's tiles");
+
+        let (answer, held) = crate::job::Job::pending();
+        app.export_preview.as_mut().unwrap().icons_job = Some(held);
+        for sizes in [vec![16, 32], vec![16], vec![16, 32, 48, 256]] {
+            set(&mut app, sizes);
+            crate::repeat::tests::pass(&ctx, &mut app, Vec::new());
+        }
+        assert_eq!(preview(&app), (landed_at, 3, true), "no second worker");
+
+        let one = IconsBuilt {
+            tiles: vec![(16, vec![0; 16 * 16 * 4], false)],
+            bytes: 1,
+        };
+        answer.send(Some(one)).unwrap();
+        land(&ctx, &mut app);
+        let (now, tiles, _) = preview(&app);
+        assert_eq!(now, app.session.revision(), "the newest key, once it lands");
+        assert_eq!(tiles, 4, "every size of the newest key");
+
+        set(&mut app, vec![16, 32]);
+        crate::repeat::tests::pass(&ctx, &mut app, Vec::new());
+        let (_, tiles, running) = preview(&app);
+        assert!(running, "the fixture: the new tiles are still being drawn");
+        assert_eq!(tiles, 4, "the last tiles stay up");
+    }
+
+    /// A white `side`-square frame named `name` holding a black dot a quarter of
+    /// its side in its top-left corner, at `x` on `parent`, filled with `ground`
+    /// and its fill out of exports at `hidden`.
+    fn grounded_frame(
+        app: &mut crate::app::OndinApp,
+        (name, side, x): (&str, f64, f64),
+        ground: Option<ondin_core::Brush>,
+        hidden: bool,
+    ) -> NodeId {
+        let parent = app.session.doc.first_page();
+        let (frame, dot) = (app.session.ids.mint(), app.session.ids.mint());
+        let fill = |id, brush| Operation::SetFills {
+            id,
+            fills: ondin_core::keyed_by_position(
+                Option::<ondin_core::Brush>::into_iter(brush).map(|b| ondin_core::Fill {
+                    brush: b.into(),
+                    visible: true,
+                }),
+            ),
+        };
+        let index = app.session.doc.get(parent).unwrap().children().len();
+        let square = |s: f64| ondin_core::kurbo::Size::new(s, s);
+        assert!(app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: frame,
+                parent,
+                index,
+                kind: ondin_core::NodeKind::Artboard {
+                    size: square(side),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(ondin_core::kurbo::Affine::translate((x, 500.0))),
+                name: Some(name.into()),
+            },
+            fill(frame, ground),
+            Operation::CreateNode {
+                id: dot,
+                parent: frame,
+                index: 0,
+                kind: ondin_core::NodeKind::Rect {
+                    size: square(side / 4.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: None,
+                name: None,
+            },
+            fill(
+                dot,
+                Some(ondin_core::Brush::Solid(ondin_core::peniko::Color::BLACK))
+            ),
+            Operation::SetFillHiddenInExport { id: frame, hidden },
+        ])));
+        frame
+    }
+
+    fn white() -> Option<ondin_core::Brush> {
+        Some(ondin_core::Brush::Solid(ondin_core::peniko::Color::WHITE))
+    }
+
+    /// The ICO preview leaves out a flagged frame's fill and its own size frame's,
+    /// as the file does (`plan::drawn_roots`): no ground at 16, drawn from the
+    /// size frame, nor at 32, scaled from the layer; the flag-off control has one.
+    ///
+    /// flip: `icon_copy` stripping `plan::origins_of` → fails at "16 from its frame".
+    #[test]
+    fn the_icon_preview_leaves_a_size_frames_fill_out() {
+        for hidden in [true, false] {
+            let ctx = egui::Context::default();
+            crate::theme::install(&ctx);
+            let mut app = crate::app::OndinApp::headless(&ctx);
+            let icon = grounded_frame(&mut app, ("icon", 64.0, 0.0), white(), hidden);
+            grounded_frame(&mut app, ("icon-16", 16.0, 100.0), white(), hidden);
+            let spec = ExportSpec {
+                sizes: vec![16, 32],
+                size_frames: true,
+                ..ExportSpec::new(ExportFormat::Ico, ExportScale::Times(1.0))
+            };
+            let key = PreviewKey {
+                node: icon,
+                spec,
+                revision: app.session.revision(),
+            };
+            let job = app
+                .build_export_preview(&ctx, key)
+                .and_then(|p| p.icons_job)
+                .expect("a worker");
+            let built = job.wait().flatten().expect("the tiles");
+            let ground = |side: u32| {
+                let (_, rgba, framed) = built
+                    .tiles
+                    .iter()
+                    .find(|(s, ..)| *s == side)
+                    .expect("the size");
+                let (x, y) = (side * 3 / 4, side * 3 / 4);
+                (rgba[((y * side + x) * 4 + 3) as usize], *framed)
+            };
+            let want = if hidden { 0 } else { 255 };
+            assert_eq!(
+                ground(16),
+                (want, true),
+                "16 from its frame, hidden={hidden}"
+            );
+            assert_eq!(ground(32), (want, false), "32 scaled, hidden={hidden}");
+        }
+    }
+
+    /// A vector row's note, the merged-colour count and the one-PDF file are
+    /// read off the file's own drawing: a flagged frame's fill counts as no fill.
+    ///
+    /// flip: `vector_note` reading the document as it is → fails at "the note";
+    /// `export_merged_colours` so → fails at "the merged colours"; `frames_pdf`
+    /// so → fails at "the PDF".
+    #[test]
+    fn the_vector_doors_leave_a_flagged_fill_out() {
+        use ondin_core::peniko::{Color, Gradient};
+        let sweep = || {
+            let g = Gradient::new_sweep((8.0, 8.0), 0.0, std::f32::consts::TAU)
+                .with_stops([(0.0_f32, Color::WHITE), (1.0_f32, Color::BLACK)]);
+            Some(ondin_core::Brush::Gradient(g.into()))
+        };
+        let read = |ground: Option<ondin_core::Brush>, hidden: bool| {
+            let ctx = egui::Context::default();
+            crate::theme::install(&ctx);
+            let mut app = crate::app::OndinApp::headless(&ctx);
+            let frame = grounded_frame(&mut app, ("card", 16.0, 0.0), ground, hidden);
+            let svg = ExportSpec::new(ExportFormat::Svg, ExportScale::Times(1.0));
+            let note = app.vector_note(frame, &svg);
+            let current = ExportSpec {
+                colour: SvgColour::CurrentColor,
+                ..svg
+            };
+            let merged = app.export_merged_colours(frame, &current);
+            let (doc, res) = (&app.session.doc, &app.session.resolved);
+            let pdf = frames_pdf(doc, res, &[("card".into(), vec![frame])]).expect("a PDF");
+            (note, merged, pdf.pdf)
+        };
+        let (note, _, _) = read(sweep(), true);
+        assert_eq!(note, None, "the note");
+        assert!(read(sweep(), false).0.is_some(), "the control's note");
+        let (_, merged, pdf) = read(white(), true);
+        let (_, bare_merged, bare_pdf) = read(None, false);
+        let (_, white_merged, white_pdf) = read(white(), false);
+        assert_ne!(
+            bare_merged, white_merged,
+            "the fixture: the ground is a colour"
+        );
+        assert_eq!(merged, bare_merged, "the merged colours");
+        assert!(bare_pdf != white_pdf, "the fixture: the ground is drawn");
+        assert!(pdf == bare_pdf, "the PDF");
     }
 
     /// A closed SVG row's settings button is marked by any SVG setting off its

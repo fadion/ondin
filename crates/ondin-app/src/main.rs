@@ -2636,6 +2636,86 @@ mod tests {
         assert_eq!(&zip[..4], b"PK\x03\x04", "zip signature");
     }
 
+    /// `ondin export --png` leaves out a frame's fill flagged out of exports, as
+    /// the app's exports do; the flag-off control draws it.
+    ///
+    /// flip: `run_export` drawing the document as it is (`draws` false) → fails
+    /// at "no ground".
+    #[test]
+    fn export_leaves_a_flagged_fill_out() {
+        use ondin_core::kurbo::Size;
+        use ondin_core::{Document, Fill, IdSource, NodeKind, Operation, Transaction};
+
+        let dir = std::env::temp_dir().join(format!("ondin-export-flag-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for hidden in [true, false] {
+            let mut ids = IdSource::new(0xE8);
+            let root = ids.mint();
+            let mut doc = Document::new(root);
+            let (frame, dot) = (ids.mint(), ids.mint());
+            let fill = |id, color| Operation::SetFills {
+                id,
+                fills: ondin_core::keyed_by_position([Fill {
+                    brush: ondin_core::peniko::Brush::Solid(color).into(),
+                    visible: true,
+                }]),
+            };
+            doc.apply(&Transaction(vec![
+                Operation::CreateNode {
+                    id: frame,
+                    parent: root,
+                    index: 0,
+                    kind: NodeKind::Artboard {
+                        size: Size::new(16.0, 16.0),
+                        corner_radii: Default::default(),
+                        corner_smoothing: 0.0,
+                    },
+                    transform: None,
+                    name: None,
+                },
+                fill(frame, ondin_core::peniko::Color::WHITE),
+                Operation::CreateNode {
+                    id: dot,
+                    parent: frame,
+                    index: 0,
+                    kind: NodeKind::Rect {
+                        size: Size::new(4.0, 4.0),
+                        corner_radii: Default::default(),
+                        corner_smoothing: 0.0,
+                    },
+                    transform: None,
+                    name: None,
+                },
+                fill(dot, ondin_core::peniko::Color::BLACK),
+                Operation::SetFillHiddenInExport { id: frame, hidden },
+            ]))
+            .unwrap();
+            let src = dir.join(format!("flag-{hidden}.ondin"));
+            std::fs::write(&src, ondin_core::io::save(&doc).unwrap()).unwrap();
+            let out = dir.join(format!("flag-{hidden}.png"));
+            run_export(
+                &src.to_string_lossy(),
+                ExportFormat::Png,
+                Some(&out.to_string_lossy()),
+                ExportScale::Times(1.0),
+                None,
+                ExportText::Live,
+                &[],
+            )
+            .expect("export succeeds");
+            let png = image::load_from_memory(&std::fs::read(&out).unwrap())
+                .unwrap()
+                .to_rgba8();
+            assert_eq!(png.width(), 16, "the fixture: the page is the frame");
+            let want = if hidden { 0 } else { 255 };
+            assert_eq!(
+                png.get_pixel(12, 12).0[3],
+                want,
+                "no ground, hidden={hidden}"
+            );
+        }
+    }
+
     /// `--scale 2` doubles both sides of the raster, read out of the PNG header so
     /// the assertion survives the whole write.
     ///

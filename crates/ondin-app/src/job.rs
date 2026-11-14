@@ -53,4 +53,12 @@ impl<T: Send + 'static> Job<T> {
         let _ = tx.send(value);
         Self { rx }
     }
+
+    /// A job in flight until its sender answers (tests only), for a test that
+    /// holds a worker's answer back.
+    #[cfg(test)]
+    pub(crate) fn pending() -> (std::sync::mpsc::Sender<T>, Self) {
+        let (tx, rx) = channel();
+        (tx, Self { rx })
+    }
 }

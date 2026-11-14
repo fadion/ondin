@@ -190,6 +190,7 @@ impl Renderer {
         let cancel = Arc::new(AtomicBool::new(false));
         let cancelled = Arc::clone(&cancel);
         let handle = std::thread::spawn(move || {
+            let mut faces = Faces::for_covers();
             for (entry, key) in jobs {
                 if cancelled.load(Ordering::Relaxed) {
                     return;
@@ -205,7 +206,7 @@ impl Renderer {
                     if POISONED.lock().is_ok_and(|p| p.as_deref() == Some(&key)) {
                         panic!("synthetic cover panic — cover::POISONED({key})");
                     }
-                    render(dir.as_deref(), &entry, &key)
+                    render(dir.as_deref(), &entry, &key, &mut faces)
                 }))
                 .unwrap_or(Err(NoCover::Blank));
                 if report.send((key, answer)).is_err() {
@@ -521,7 +522,12 @@ struct Rgba {
 }
 
 /// Produce a cover: from the disk cache if it is there, by rendering if not.
-fn render(dir: Option<&Path>, entry: &Entry, key: &str) -> Result<Rgba, NoCover> {
+fn render(
+    dir: Option<&Path>,
+    entry: &Entry,
+    key: &str,
+    faces: &mut Faces,
+) -> Result<Rgba, NoCover> {
     let path = dir.map(|d| cache_path(d, key));
     if let Some(rgba) = path
         .as_ref()
@@ -532,7 +538,7 @@ fn render(dir: Option<&Path>, entry: &Entry, key: &str) -> Result<Rgba, NoCover>
     }
     // No cached file and a cached file that will not decode (a half-written PNG)
     // both mean "render it again"; re-rendering writes over the bad one.
-    let png = rasterize(entry)?;
+    let png = rasterize(entry, faces)?;
     if let Some(p) = &path {
         if let Some(dir) = p.parent() {
             let _ = std::fs::create_dir_all(dir);
@@ -550,9 +556,10 @@ fn render(dir: Option<&Path>, entry: &Entry, key: &str) -> Result<Rgba, NoCover>
 ///
 /// A file that will not read or load is `Unreadable` (a broken document the
 /// dashboard marks); a page with no extent is `Blank` (an ordinary empty one).
-fn rasterize(entry: &Entry) -> Result<Vec<u8>, NoCover> {
+fn rasterize(entry: &Entry, faces: &mut Faces) -> Result<Vec<u8>, NoCover> {
     let bytes = std::fs::read(&entry.path).map_err(|_| NoCover::Unreadable)?;
     let doc = ondin_core::io::load(&bytes).map_err(|_| NoCover::Unreadable)?;
+    faces.register_for(&doc);
     let res = ondin_core::Resolved::rebuild(&doc);
     // The first page that is not a draft, or the first page when every one is.
     let page = doc.gathered_pages().next().unwrap_or(doc.first_page());
@@ -565,6 +572,42 @@ fn rasterize(entry: &Entry) -> Result<Vec<u8>, NoCover> {
     let scale = (COVER_MAX_PX / w.max(h)).min(1.0);
     let vp = ondin_export::png::viewport_at(view, scale);
     Ok(ondin_export::png::png(&doc, &res, &vp, page))
+}
+
+/// The faces the cover thread lays text out in. Its shaping engine holds only
+/// Inter, so the families a document names are registered first, from the
+/// installed fonts and the web fonts already downloaded; a family in neither
+/// draws in Inter, as it does in the window. Read once, and only when a
+/// document names a family the thread lacks.
+struct Faces {
+    dirs: Vec<PathBuf>,
+    system: bool,
+    fonts: Option<crate::mcp::system_fonts::SystemFonts>,
+}
+
+impl Faces {
+    /// The installed fonts and the font service's download folder.
+    fn for_covers() -> Self {
+        Self {
+            dirs: vec![crate::machine_dir::root_or_temp().join("fonts")],
+            system: true,
+            fonts: None,
+        }
+    }
+
+    /// Register the faces of every family `doc` names that this thread lacks.
+    fn register_for(&mut self, doc: &ondin_core::Document) {
+        let lacking = ondin_core::families::families_in_use(doc)
+            .into_iter()
+            .any(|(family, _)| !ondin_core::text::is_family_available(&family));
+        if !lacking {
+            return;
+        }
+        let (dirs, system) = (&self.dirs, self.system);
+        self.fonts
+            .get_or_insert_with(|| crate::mcp::system_fonts::SystemFonts::load_from(dirs, system))
+            .register_for(doc);
+    }
 }
 
 /// PNG bytes to RGBA8.
@@ -623,6 +666,80 @@ mod tests {
             .expect("the fixture must be in the library")
     }
 
+    /// No faces to register: a cover drawn as a thread with only Inter draws it.
+    fn no_faces() -> Faces {
+        Faces {
+            dirs: Vec::new(),
+            system: false,
+            fonts: None,
+        }
+    }
+
+    /// A cover draws a text in the family it names, read from the fonts folder,
+    /// not in the cover thread's Inter.
+    ///
+    /// flip: `rasterize` not calling `Faces::register_for` → fails at "drawn in
+    /// its family".
+    #[test]
+    fn a_cover_draws_text_in_its_own_family() {
+        let root_dir = temp("family");
+        let fonts = root_dir.join("fonts-dir");
+        std::fs::create_dir_all(&fonts).unwrap();
+        let icons = include_bytes!("../../assets/fonts/OndinIcons.ttf");
+        std::fs::write(fonts.join("icons.ttf"), icons).unwrap();
+        let mut db = fontdb::Database::new();
+        db.load_font_data(icons.to_vec());
+        let family = db.faces().next().unwrap().families[0].0.clone();
+        assert!(
+            !ondin_core::text::is_family_available(&family),
+            "the thread starts without {family}"
+        );
+        let mut ids = IdSource::new(0xF0);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let kind = NodeKind::Text {
+            content: crate::theme::icon::DIAMOND.into(),
+            style: Box::new(ondin_core::TextStyle {
+                font_family: family.clone(),
+                font_size: 48.0,
+                ..ondin_core::TextStyle::default()
+            }),
+            spans: Default::default(),
+            para_spans: Default::default(),
+            paragraph: Default::default(),
+            block: Default::default(),
+            sizing: ondin_core::TextSizing::Auto,
+            on_path: None,
+            on_path_flip: false,
+            on_path_offset: 0.0,
+        };
+        let op = Operation::CreateNode {
+            id: ids.mint(),
+            parent: root,
+            index: 0,
+            kind,
+            transform: None,
+            name: None,
+        };
+        doc.apply(&Transaction(vec![op])).expect("a text layer");
+        store::file_document(&root_dir, None, "Glyph", &mut doc).unwrap();
+        let entry = scan::scan(&root_dir)
+            .into_iter()
+            .find(|e| e.display_name() == "Glyph")
+            .unwrap();
+        // First with nothing to register, since a family registered stays.
+        let inter = rasterize(&entry, &mut no_faces()).expect("a cover in Inter");
+        let mut faces = Faces {
+            dirs: vec![fonts],
+            system: false,
+            fonts: None,
+        };
+        let own = rasterize(&entry, &mut faces).expect("a cover in its family");
+        assert_ne!(own, inter, "drawn in its family");
+        assert!(ondin_core::text::is_family_available(&family));
+        let _ = std::fs::remove_dir_all(&root_dir);
+    }
+
     /// A document `io::load` refuses and the metadata probe calls healthy: one
     /// number changed, structurally perfect — a file written by a newer build.
     fn written_by_a_newer_build(root_dir: &Path) -> Entry {
@@ -653,7 +770,7 @@ mod tests {
     fn a_document_with_something_in_it_rasterizes_to_its_own_shape() {
         let root = temp("raster");
         let entry = doc_with_a_rect(&root, "Landing v4");
-        let png = rasterize(&entry).expect("a document with a rect must render");
+        let png = rasterize(&entry, &mut no_faces()).expect("a document with a rect must render");
         let rgba = decode(&png).expect("and the PNG must decode");
         // 80×60 is under the cap, so it is drawn 1:1 rather than magnified.
         assert_eq!((rgba.width, rgba.height), (80, 60));
@@ -670,7 +787,10 @@ mod tests {
         store::file_document(&root, None, "Untitled", &mut doc).unwrap();
         let entry = scan::scan(&root).into_iter().next().unwrap();
         // `Blank`, not merely "no cover": the two failures must be told apart.
-        assert_eq!(rasterize(&entry).err(), Some(NoCover::Blank));
+        assert_eq!(
+            rasterize(&entry, &mut no_faces()).err(),
+            Some(NoCover::Blank)
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -684,7 +804,10 @@ mod tests {
     fn a_document_the_loader_refuses_is_unreadable_where_an_empty_one_is_merely_blank() {
         let root = temp("unreadable");
         let entry = written_by_a_newer_build(&root);
-        assert_eq!(rasterize(&entry).err(), Some(NoCover::Unreadable));
+        assert_eq!(
+            rasterize(&entry, &mut no_faces()).err(),
+            Some(NoCover::Unreadable)
+        );
         assert!(
             !entry.unread,
             "the probe still calls it healthy, which is what makes the cover's \

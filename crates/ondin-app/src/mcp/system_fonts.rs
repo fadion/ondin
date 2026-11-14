@@ -1,6 +1,8 @@
-//! The installed font families `serve` lists and draws with. The window has its
-//! font service for this; `serve` reads the system's fonts once, on first need,
-//! and registers a family's faces with the shaping engine when a document names it.
+//! The installed font families `serve` lists and draws with, and the faces a
+//! thread with no font service (`serve`, the cover renderer) registers. The
+//! window has its font service for this; these read the fonts once, on first
+//! need, and register a family's faces with the shaping engine when a document
+//! names it.
 
 use ondin_core::Document;
 use std::collections::HashSet;
@@ -18,8 +20,18 @@ impl SystemFonts {
     /// Read every installed face. Slow (a directory walk and a header read per
     /// file), so `serve` calls it once.
     pub(crate) fn load() -> Self {
+        Self::load_from(&[], true)
+    }
+
+    /// The faces in `dirs`, and the installed ones when `system` says so.
+    pub(crate) fn load_from(dirs: &[PathBuf], system: bool) -> Self {
         let mut db = fontdb::Database::new();
-        db.load_system_fonts();
+        if system {
+            db.load_system_fonts();
+        }
+        for dir in dirs {
+            db.load_fonts_dir(dir);
+        }
         let families = crate::fonts::listed_families(&db).into_iter().collect();
         Self {
             db,
@@ -57,7 +69,7 @@ impl SystemFonts {
                 };
                 let path = match &face.source {
                     fontdb::Source::File(p) | fontdb::Source::SharedFile(p, _) => p.clone(),
-                    // `load_system_fonts` reads files only.
+                    // The database is filled from files only.
                     fontdb::Source::Binary(_) => continue,
                 };
                 // A collection file holds several faces; it registers whole once.

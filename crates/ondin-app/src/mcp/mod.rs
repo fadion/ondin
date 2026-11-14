@@ -17,7 +17,7 @@ pub(crate) mod propose;
 pub(crate) mod proxy;
 mod reads;
 pub(crate) mod serve;
-mod system_fonts;
+pub(crate) mod system_fonts;
 pub(crate) mod window;
 
 use crate::library::state::Library;

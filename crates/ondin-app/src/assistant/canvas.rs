@@ -258,8 +258,10 @@ impl OndinApp {
                 p.extend(egui::Shape::dashed_line(&side, stroke, 5.0, 3.0));
             }
         }
+        // A layer on another page has no place here to outline.
         if let Some(wire) = &self.assistant.hovered
             && let Some(id) = NodeId::from_wire(wire)
+            && self.session.doc.page_of(id) == Some(self.session.page)
             && let Some(r) = self.session.preview_world_bounds(id)
         {
             let r = self.screen_rect(r, ppp);

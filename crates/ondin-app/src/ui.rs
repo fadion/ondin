@@ -2786,7 +2786,6 @@ pub fn layer_chip(ui: &mut egui::Ui, chip: LayerChip<'_>) -> LayerChipOut {
         true => (color::field(), theme::text::faint()),
         false => (color::accent_a(46), color::accent_100()),
     };
-    let galley = ui.painter().layout_no_wrap(label, font, ink);
     let glyph_w = SMALL_PT;
     // The × stands in the trailing inset, its box [`X_INSET`] from the edge.
     let tail = if chip.removable {
@@ -2794,8 +2793,26 @@ pub fn layer_chip(ui: &mut egui::Ui, chip: LayerChip<'_>) -> LayerChipOut {
     } else {
         PAD
     };
+    // A name too long for the row is cut with an ellipsis, as a menu row's is,
+    // and the chip says it whole on hover; it never widens what holds it. The
+    // room is a whole row's, so a wrapping row moves a chip down before cutting.
+    let room = (ui.max_rect().width() - PAD - glyph_w - GAP - tail).max(0.0);
+    let mut job =
+        egui::text::LayoutJob::single_section(label.clone(), egui::TextFormat::simple(font, ink));
+    job.wrap = egui::text::TextWrapping {
+        max_width: room,
+        max_rows: 1,
+        break_anywhere: true,
+        overflow_character: Some('…'),
+    };
+    let galley = ui.painter().layout_job(job);
+    let cut = galley.elided;
     let w = PAD + glyph_w + GAP + galley.size().x + tail;
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, CHIP_H), egui::Sense::click());
+    let resp = match cut {
+        true => resp.on_hover_text(label),
+        false => resp,
+    };
     // The × sits on the chip and takes its hover, so the chip counts as
     // hovered while either is.
     let x = chip.removable.then(|| {
@@ -7620,6 +7637,31 @@ mod keyboard_focus_tests {
 
         let ((_, digits), _, _) = run(false);
         assert!(digits, "unmarked: Tab goes straight to the digits");
+    }
+
+    /// A layer chip with a name longer than its row stays within the row, its
+    /// name cut with an ellipsis; a short name is drawn whole.
+    /// flip: `layer_chip` laying the name out unwrapped → fails at "within".
+    #[test]
+    fn a_long_layer_chip_stays_within_its_row() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let width = |name: &str| {
+            let mut w = 0.0;
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                ui.set_max_width(300.0);
+                let chip = LayerChip {
+                    name,
+                    removable: true,
+                    ..Default::default()
+                };
+                w = layer_chip(ui, chip).resp.rect.width();
+            });
+            w
+        };
+        let long = "Pricing card / Enterprise / ".repeat(20);
+        assert!(width(&long) <= 300.0, "within: {}", width(&long));
+        assert!(width("Card") < 120.0);
     }
 
     /// A value field being typed in wears one typing edge, the row's.

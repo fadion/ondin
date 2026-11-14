@@ -162,6 +162,59 @@ pub(crate) struct ExportPreview {
     icons: Vec<IconTile>,
     /// The line under it: format, size, and what it weighs.
     summary: String,
+    /// An icon file's sizes being drawn on a worker: each size copies and
+    /// resolves the whole document, a tenth of a second on a large page with
+    /// *Pixel-fit*. The tiles shown meanwhile are the last ones drawn.
+    icons_job: Option<crate::job::Job<Option<IconsBuilt>>>,
+}
+
+/// An icon preview drawn on its worker: each size's side, pixels and whether
+/// it came from a frame of its own, and the file's weight.
+pub(crate) struct IconsBuilt {
+    tiles: Vec<(u32, Vec<u8>, bool)>,
+    bytes: usize,
+}
+
+/// Take `p`'s icon tiles from their worker once they are drawn: a texture a
+/// size, and the summary. A layer with nothing to draw leaves no tiles.
+fn land_icons(ctx: &egui::Context, p: &mut ExportPreview) {
+    let Some(job) = &p.icons_job else {
+        return;
+    };
+    let built = match job.poll() {
+        Ok(None) => return,
+        Ok(Some(built)) => built,
+        Err(()) => None,
+    };
+    p.icons_job = None;
+    let Some(built) = built else {
+        p.icons.clear();
+        p.summary.clear();
+        return;
+    };
+    p.summary = format!(
+        "{} · {} · {}",
+        p.key.spec.format.label(),
+        ui::count(built.tiles.len(), "size"),
+        human_bytes(built.bytes)
+    );
+    p.icons = built
+        .tiles
+        .into_iter()
+        .map(|(size, rgba, framed)| {
+            let side = size as usize;
+            let image = egui::ColorImage::from_rgba_unmultiplied([side, side], &rgba);
+            IconTile {
+                size,
+                texture: ctx.load_texture(
+                    format!("export-icon-{size}"),
+                    image,
+                    egui::TextureOptions::LINEAR,
+                ),
+                framed,
+            }
+        })
+        .collect();
 }
 
 /// One size of an icon file's preview.
@@ -612,6 +665,9 @@ impl OndinApp {
             if self.export_preview.as_ref().map(|p| &p.key) != Some(&key) {
                 self.export_preview = self.build_export_preview(ui.ctx(), key);
             }
+            if let Some(p) = &mut self.export_preview {
+                land_icons(ui.ctx(), p);
+            }
             let Some(preview) = &self.export_preview else {
                 return;
             };
@@ -668,9 +724,10 @@ impl OndinApp {
         key: PreviewKey,
     ) -> Option<ExportPreview> {
         let (doc, res) = (&self.session.doc, &self.session.resolved);
-        // The copy the file is drawn from, frames' fills left out as asked.
-        let origins = ondin_export::plan::origins_of(doc, res, key.node);
-        let stripped = ondin_export::plan::for_export(doc, &origins);
+        // The copy the file is drawn from, frames' fills left out as asked: an
+        // icon's own size frames' too, as `plan::render` draws it.
+        let roots = ondin_export::plan::drawn_roots(doc, res, key.node, &key.spec);
+        let stripped = ondin_export::plan::for_export(doc, &roots);
         let (doc, res) = match &stripped {
             Some((d, r)) => (d, r),
             None => (doc, res),
@@ -678,37 +735,35 @@ impl OndinApp {
         // A slice previews its box of the page, as its file is (`plan::render`).
         let region = ondin_export::plan::slice_region(doc, res, key.node);
         if key.spec.format.is_icon() {
-            let entries = ondin_export::icon::entries(doc, res, key.node, &key.spec)?;
-            let bytes = ondin_export::icon::encode(key.spec.format, &entries).unwrap_or_default();
-            let summary = format!(
-                "{} · {} · {}",
-                key.spec.format.label(),
-                ui::count(entries.len(), "size"),
-                human_bytes(bytes.len())
-            );
-            let icons = entries
-                .into_iter()
-                .map(|e| {
-                    let side = e.size as usize;
-                    let image =
-                        egui::ColorImage::from_rgba_unmultiplied([side, side], &e.raster.rgba);
-                    IconTile {
-                        size: e.size,
-                        texture: ctx.load_texture(
-                            format!("export-icon-{}", e.size),
-                            image,
-                            egui::TextureOptions::LINEAR,
-                        ),
-                        framed: e.frame.is_some(),
-                    }
-                })
-                .collect();
+            let (doc, res) = (doc.clone(), res.clone());
+            let (node, spec) = (key.node, key.spec.clone());
+            let job = crate::job::Job::spawn("ondin-icon-preview", ctx, move || {
+                // This thread's text engine holds Inter alone until it is given
+                // the document's faces; each size lays its copy out again.
+                ondin_core::text::register_font_data(&res.text_fonts());
+                let entries = ondin_export::icon::entries(&doc, &res, node, &spec)?;
+                let bytes =
+                    ondin_export::icon::encode(spec.format, &entries).map_or(0, |b| b.len());
+                let tiles = entries
+                    .into_iter()
+                    .map(|e| (e.size, e.raster.rgba, e.frame.is_some()))
+                    .collect();
+                Some(IconsBuilt { tiles, bytes })
+            });
+            // The same row a revision on keeps its tiles until the new ones land.
+            let (icons, summary) = self
+                .export_preview
+                .as_mut()
+                .filter(|p| p.key.node == key.node && p.key.spec == key.spec)
+                .map(|p| (std::mem::take(&mut p.icons), std::mem::take(&mut p.summary)))
+                .unwrap_or_default();
             return Some(ExportPreview {
                 key,
                 texture: None,
                 pixels: (0, 0),
                 icons,
                 summary,
+                icons_job: Some(job),
             });
         }
         // No raster for a vector file: rasterizing it would preview something other
@@ -741,6 +796,7 @@ impl OndinApp {
                 pixels: (pw, ph),
                 icons: Vec::new(),
                 summary: format!("{pw}×{ph} — too large to preview here"),
+                icons_job: None,
             });
         }
 
@@ -772,6 +828,7 @@ impl OndinApp {
             pixels: (raster.width, raster.height),
             icons: Vec::new(),
             summary,
+            icons_job: None,
         })
     }
 
@@ -5363,6 +5420,18 @@ mod code_export_tests {
         app.collapsed_panels.remove(PREVIEW);
         let mut out = crate::repeat::tests::pass(&ctx, &mut app, Vec::new());
         for _ in 0..10 {
+            out = crate::repeat::tests::pass(&ctx, &mut app, Vec::new());
+        }
+        // The tiles are drawn on a worker: wait for them to land.
+        for _ in 0..400 {
+            if app
+                .export_preview
+                .as_ref()
+                .is_some_and(|p| p.icons_job.is_none())
+            {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
             out = crate::repeat::tests::pass(&ctx, &mut app, Vec::new());
         }
         let card = ctx

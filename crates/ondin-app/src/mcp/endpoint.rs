@@ -98,7 +98,21 @@ pub(crate) fn hosts() -> Vec<Found> {
     let Some(dir) = run_dir() else {
         return Vec::new();
     };
-    let Ok(entries) = std::fs::read_dir(&dir) else {
+    hosts_in(
+        &dir,
+        |endpoint| connect(endpoint).is_ok(),
+        ondin_ai::process_running,
+    )
+}
+
+/// [`hosts`] over the discovery files in `dir`, with `answers` saying whether
+/// an endpoint takes a connection and `running` whether a process lives.
+fn hosts_in(
+    dir: &Path,
+    answers: impl Fn(&Path) -> bool,
+    running: impl Fn(u32) -> bool,
+) -> Vec<Found> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
     let mut found: Vec<(Found, PathBuf)> = entries
@@ -114,10 +128,10 @@ pub(crate) fn hosts() -> Vec<Found> {
     // privilege refuses too. Only a file whose process is gone is removed, since
     // a window writes its file once and would stay unseen until it restarts.
     found.retain(|(f, file)| {
-        if connect(&f.endpoint).is_ok() {
+        if answers(&f.endpoint) {
             return true;
         }
-        if !ondin_ai::process_running(f.pid) {
+        if !running(f.pid) {
             let _ = std::fs::remove_file(file);
         }
         false
@@ -379,4 +393,46 @@ pub(crate) fn connect(addr: &Path) -> std::io::Result<Stream> {
     let stream = std::os::unix::net::UnixStream::connect(addr)?;
     let read = stream.try_clone()?;
     Ok((Box::new(read), Box::new(stream)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The sweep lists the files whose endpoint answers, the window's first,
+    /// keeps a refusing file whose process lives, and removes only a file whose
+    /// process is gone.
+    ///
+    /// flip: `hosts_in` removing a file on a failed connect alone → fails at
+    /// "stays on disk".
+    #[test]
+    fn the_sweep_removes_only_a_dead_hosts_file() {
+        let dir = std::env::temp_dir().join(format!("ondin-endpoint-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let write = |name: &str, pid: u32, host: Host| {
+            let found = Found {
+                pid,
+                host,
+                endpoint: PathBuf::from(name),
+            };
+            let file = dir.join(format!("{name}.json"));
+            std::fs::write(&file, serde_json::to_vec(&found).unwrap()).unwrap();
+            file
+        };
+        let serve = write("serve", 1, Host::Serve);
+        let window = write("window", 2, Host::Window);
+        let busy = write("busy", 3, Host::Window);
+        let dead = write("dead", 4, Host::Serve);
+        let listed = hosts_in(
+            &dir,
+            |endpoint| endpoint == Path::new("serve") || endpoint == Path::new("window"),
+            |pid| pid != 4,
+        );
+        let pids: Vec<u32> = listed.iter().map(|f| f.pid).collect();
+        assert_eq!(pids, [2, 1], "the answering files, the window's first");
+        assert!(busy.exists(), "a refusing live host's file stays on disk");
+        assert!(!dead.exists(), "a dead host's file is removed");
+        assert!(serve.exists() && window.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

@@ -328,11 +328,6 @@ impl Engine {
         self.clients.values().filter_map(|c| c.document.as_deref())
     }
 
-    /// Whether any connection is open.
-    pub(crate) fn has_connections(&self) -> bool {
-        !self.live.is_empty()
-    }
-
     /// Whether a keyed client's state is held, which a host keeps for its next
     /// connection.
     pub(crate) fn remembers_clients(&self) -> bool {
@@ -2570,8 +2565,8 @@ mod tests {
         assert_eq!(ok(&out)["pixel_size"], json!([3, 2]), "the size");
     }
 
-    /// A connection that never called closing is no client leaving, which
-    /// `serve` would otherwise end on; one that called is.
+    /// A connection that never called closing is no client leaving, so a host
+    /// keeps its documents; one that called is.
     ///
     /// flip: `Engine::closed` answering `true` always → fails at the probe.
     #[test]
@@ -2579,9 +2574,7 @@ mod tests {
         let (mut engine, mut docs) = (Engine::default(), One::new());
         open(&mut engine, &mut docs, 1);
         assert!(!engine.closed(2), "a probe never called");
-        assert!(engine.has_connections());
         assert!(engine.closed(1), "a client that called left");
-        assert!(!engine.has_connections());
     }
 
     /// Another connection's edit is reported as `changed` on this one's next

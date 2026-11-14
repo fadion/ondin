@@ -238,6 +238,12 @@ impl OndinApp {
     /// kept clean.
     fn write_behind(&mut self, path: &Path) -> Result<(), String> {
         let id = self.tab_of_path(path).ok_or("the tab closed")?;
+        // A library document's kept history is tied to its file's bytes, so it
+        // is written again beside them, as the person's save does.
+        let root = path
+            .starts_with(&self.library.root)
+            .then(|| self.library.root.clone());
+        let limit = usize::try_from(self.prefs.history_size).unwrap_or(usize::MAX);
         let Some(Body::Parked(p)) = self.tabs.get_mut(id).map(|t| &mut t.body) else {
             return Err(format!("{} is not loaded", path.display()));
         };
@@ -253,6 +259,16 @@ impl OndinApp {
         }
         let digest = crate::library::store::write_document_digest(path, &p.session.doc)
             .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+        if let (Some(root), Some(doc_id)) = (root, p.session.doc.meta().id.clone())
+            && let Err(e) = crate::library::history::write(
+                &root,
+                &doc_id,
+                &digest,
+                p.session.history.saved(limit),
+            )
+        {
+            log::warn!(target: "ondin", "keeping the undo history of {}: {e}", path.display());
+        }
         p.session.disk = crate::library::disk::Stamp::of(path, digest);
         p.session.mark_saved(path.to_path_buf());
         Ok(())
@@ -380,6 +396,32 @@ mod tests {
         };
         assert_eq!(content.as_str(), "Hello there", "typing kept");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An agent's write to a library document behind keeps its undo history
+    /// tied to the bytes written, so the next open resumes it.
+    ///
+    /// flip: `write_behind` not writing the history → fails at "kept".
+    #[test]
+    fn a_write_behind_keeps_the_undo_history() {
+        let root = crate::kits::picker::tests::temp_root("mcp-history");
+        let ctx = egui::Context::default();
+        let mut app = crate::kits::picker::tests::app_on(&ctx, root.clone());
+        let mut engine = Engine::default();
+        let mut ids = ondin_core::IdSource::new(crate::session::random_actor());
+        let mut doc = ondin_core::Document::new(ids.mint());
+        let page = doc.first_page().to_wire();
+        let path = crate::library::store::file_document(&root, None, "Plan", &mut doc).unwrap();
+        let document = json!({ "document": path.display().to_string() });
+        call(&mut engine, &mut app, "use_document", document);
+        let kind = ondin_core::verbs::example("NodeKind").unwrap();
+        let args = json!({ "parent": page, "kind": kind, "name": "Chart" });
+        call(&mut engine, &mut app, "create_node", args);
+        let digest = crate::library::history::digest(&std::fs::read(&path).unwrap());
+        let id = doc.meta().id.clone().expect("filed with an id");
+        let kept = crate::library::history::read(&root, &id, &digest);
+        assert!(kept.is_some_and(|h| !h.undo.is_empty()), "kept");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// While the person compares versions, an agent's `undo` and `redo` are

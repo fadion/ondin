@@ -20,6 +20,7 @@ mod stream;
 
 pub use find::{Found, NotFound, find, warm};
 pub use harness::{Harness, Seal};
+pub use process::process_running;
 pub use run::sweep;
 pub use session::{Config, Event, Refusal, Session, Turn};
 

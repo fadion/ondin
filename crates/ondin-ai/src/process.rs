@@ -82,6 +82,15 @@ pub(crate) fn process_start(_pid: u32) -> Option<u64> {
     None
 }
 
+/// Is a process with this pid running? `true` where the platform cannot tell,
+/// so a caller never deletes a live process's file on a guess.
+pub fn process_running(pid: u32) -> bool {
+    match cfg!(any(windows, target_os = "linux", target_os = "macos")) {
+        true => process_start(pid).is_some(),
+        false => true,
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn bsd_info(pid: u32) -> Option<libc::proc_bsdinfo> {
     let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
@@ -554,6 +563,27 @@ mod tests {
             ..me
         };
         assert!(!reissued.is_live());
+    }
+
+    /// This process is running; a child that has exited and been reaped is not.
+    /// flip: `process_running` answering `true` always → fails at the last assertion.
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn a_reaped_child_is_not_running() {
+        assert!(process_running(std::process::id()));
+        let mut c = match cfg!(windows) {
+            true => {
+                let mut c = Command::new("cmd");
+                c.args(["/C", "exit 0"]);
+                c
+            }
+            false => Command::new("true"),
+        };
+        let mut child = c.spawn().expect("spawn");
+        let pid = child.id();
+        child.wait().unwrap();
+        drop(child);
+        assert!(!process_running(pid));
     }
 
     /// A spawned child belongs to the session, this process does not, and

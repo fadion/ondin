@@ -912,6 +912,19 @@ fn inside(quad: &[Point; 4], p: Point, slack: f64) -> bool {
 /// part of `t` inside `quad` over 2 units across and a quarter of the text's
 /// height, measured by its box.
 fn covers_shape(t: Rect, quad: &[Point; 4]) -> bool {
+    let more_than_sliver = |x: Rect| x.width() > 2.0 && x.height() > 0.25 * t.height();
+    // What the quad covers lies within its box, so the boxes settle a sibling
+    // apart, and a square quad, which is its box, without clipping: a sibling
+    // scan meets thousands of each.
+    let qb = box_of(quad);
+    if !more_than_sliver(t.intersect(qb)) {
+        return false;
+    }
+    if *quad == rect_corners(qb) {
+        return true;
+    }
+    #[cfg(test)]
+    tests::CLIPS.with(|c| c.set(c.get() + 1));
     // Sutherland–Hodgman: the text's box cut by each of the quad's edges.
     let sign = winding(quad);
     let mut poly: Vec<Point> = rect_corners(t).to_vec();
@@ -937,12 +950,16 @@ fn covers_shape(t: Rect, quad: &[Point; 4]) -> bool {
             return false;
         }
     }
-    let x = poly
+    more_than_sliver(box_of(&poly))
+}
+
+/// The smallest box holding `points`.
+fn box_of(points: &[Point]) -> Rect {
+    points
         .iter()
         .fold(Rect::new(f64::MAX, f64::MAX, f64::MIN, f64::MIN), |r, p| {
             Rect::new(r.x0.min(p.x), r.y0.min(p.y), r.x1.max(p.x), r.y1.max(p.y))
-        });
-    x.width() > 2.0 && x.height() > 0.25 * t.height()
+        })
 }
 
 /// `quad`'s winding: 1 one way round, -1 the other.
@@ -1268,6 +1285,11 @@ mod tests {
     use ondin_core::effect::{Effect, EffectKind, Shadow};
     use ondin_core::kurbo::{Affine, RoundedRectRadii, Size};
     use ondin_core::{BlockStyle, Fill, TextOverflow, TextStyle};
+
+    thread_local! {
+        /// How many times `covers_shape` clipped a text's box on this thread.
+        pub(super) static CLIPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
 
     fn fill(r: u8, g: u8, b: u8) -> Value {
         json!([Fill {
@@ -1929,6 +1951,32 @@ mod tests {
             "the fixture: the boxes overlap, {tb:?} {db:?}"
         );
         assert_eq!(found(&s), Vec::<(String, String)>::new());
+    }
+
+    /// A text's filled siblings apart from it, square or turned, and a square
+    /// one over it are settled by their boxes without clipping; the one over it
+    /// still covers it.
+    ///
+    /// flip: `covers_shape` without its box test → fails at the clip count.
+    #[test]
+    fn far_and_square_siblings_are_not_clipped() {
+        let turn = |x: f64, y: f64| {
+            json!(Affine::translate((x, y)) * Affine::rotate(std::f64::consts::FRAC_PI_4))
+        };
+        let (s, _) = with(json!({
+            "kind": frame(400.0, 300.0), "name": "Card", "fills": fill(255, 255, 255),
+            "children": [
+                { "kind": text("Words", 16.0, 400, TextSizing::Auto, BlockStyle::default()), "name": "Words", "transform": at(10.0, 10.0) },
+                { "kind": rect(20.0, 20.0, 0.0), "name": "Far", "transform": at(300.0, 200.0), "fills": fill(9, 9, 9) },
+                { "kind": rect(20.0, 20.0, 0.0), "name": "Far turned", "transform": turn(300.0, 100.0), "fills": fill(9, 9, 9) },
+                { "kind": rect(30.0, 30.0, 0.0), "name": "Over", "transform": at(15.0, 5.0), "fills": fill(9, 9, 9) },
+            ],
+        }));
+        CLIPS.with(|c| c.set(0));
+        let got = found(&s);
+        assert_eq!(CLIPS.with(|c| c.get()), 0, "nothing clipped");
+        let want = [("text_covered", "Words")].map(|(c, n)| (c.to_owned(), n.to_owned()));
+        assert_eq!(got, want);
     }
 
     /// `design_context`'s section boxes leave the stroke out, so a child's box

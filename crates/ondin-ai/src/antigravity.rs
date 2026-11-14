@@ -138,8 +138,24 @@ fn claims_dir(run_root: &Path) -> PathBuf {
 
 const LOCK_NAME: &str = "settings.lock";
 
+/// How old a lock with no readable holder must be before it is taken over: far
+/// longer than writing the owner takes, and shorter than `SettingsLock::take`'s
+/// wait, so the next taker gets it.
+const UNOWNED_LOCK_STALE: Duration = Duration::from_secs(3);
+
+/// Whether a lock may be taken over: its holder is gone, or it names none (a
+/// crash between creating and writing it) and is past `UNOWNED_LOCK_STALE`.
+/// An age that cannot be read is no age.
+fn lock_is_stale(holder: Option<Owner>, age: Option<Duration>) -> bool {
+    match holder {
+        Some(h) => !h.is_live(),
+        None => age.is_some_and(|a| a > UNOWNED_LOCK_STALE),
+    }
+}
+
 /// Exclusive use of the settings file across every Ondin on the machine, held
-/// for one read-modify-write. A dead holder's lock is taken over.
+/// for one read-modify-write. A dead holder's lock, or an old one naming no
+/// holder, is taken over.
 struct SettingsLock(PathBuf);
 
 impl SettingsLock {
@@ -158,9 +174,12 @@ impl SettingsLock {
                 .open(&path)
             {
                 Ok(mut f) => {
+                    // Held before the owner is written, so a failed write
+                    // removes the file on the way out.
+                    let lock = SettingsLock(path);
                     f.write_all(format!("{} {}\n", me.pid, me.started).as_bytes())
                         .ok()?;
-                    return Some(SettingsLock(path));
+                    return Some(lock);
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
                     let held = std::fs::read_to_string(&path).ok();
@@ -171,8 +190,11 @@ impl SettingsLock {
                             started: it.next()?.parse().ok()?,
                         })
                     });
-                    // A holder that is gone, or a lock left half-written by one.
-                    if holder.is_some_and(|h| !h.is_live()) {
+                    let age = std::fs::metadata(&path)
+                        .and_then(|m| m.modified())
+                        .ok()
+                        .and_then(|t| t.elapsed().ok());
+                    if lock_is_stale(holder, age) {
                         let _ = std::fs::remove_file(&path);
                         continue;
                     }
@@ -561,6 +583,44 @@ mod tests {
         assert!(dead_at.is_file(), "kept");
         assert!(live_at.is_file(), "a live owner's marker is never touched");
         assert!(!dir.join(LOCK_NAME).exists(), "the lock is released");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A lock naming no holder is waited on while it is young and taken over
+    /// once old; a dead holder's is taken over, a live one's never.
+    /// flip: `SettingsLock::take` testing only for a dead holder → fails at "taken at once".
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn a_lock_naming_no_holder_is_taken_over_once_old() {
+        let me = Owner::me().unwrap();
+        let dead = Owner {
+            started: me.started.wrapping_add(1),
+            ..me
+        };
+        assert!(!lock_is_stale(None, Some(Duration::from_millis(10))));
+        assert!(!lock_is_stale(None, None));
+        assert!(lock_is_stale(None, Some(Duration::from_secs(60))));
+        assert!(lock_is_stale(Some(dead), None));
+        assert!(!lock_is_stale(Some(me), Some(Duration::from_secs(60))));
+        let root = std::env::temp_dir().join(format!("ondin-ai-agy-{}", crate::run::random_tag()));
+        let dir = claims_dir(&root);
+        std::fs::create_dir_all(&dir).unwrap();
+        let lock = dir.join(LOCK_NAME);
+        let empty = std::fs::File::create(&lock).unwrap();
+        empty
+            .set_modified(std::time::SystemTime::now() - Duration::from_secs(60))
+            .unwrap();
+        drop(empty);
+        let started = std::time::Instant::now();
+        let taken = SettingsLock::take(&root);
+        assert!(
+            taken.is_some() && started.elapsed() < Duration::from_secs(2),
+            "taken at once"
+        );
+        let owner = std::fs::read_to_string(&lock).unwrap();
+        assert!(owner.starts_with(&format!("{} ", me.pid)), "{owner}");
+        drop(taken);
+        assert!(!lock.exists(), "released");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

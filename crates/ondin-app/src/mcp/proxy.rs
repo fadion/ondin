@@ -396,6 +396,20 @@ fn start_serve() -> Result<Found, String> {
         // DETACHED_PROCESS | CREATE_NO_WINDOW: no console flashes up, and the
         // harness closing the proxy's console does not end it.
         command.creation_flags(0x0000_0008 | 0x0800_0000);
+        // A spawn inherits every inheritable handle, the harness's pipes to the
+        // proxy among them, whatever `Stdio` says; held by `serve`, they keep
+        // the harness from seeing the proxy's end until `serve` exits.
+        use std::os::windows::io::AsRawHandle as _;
+        use windows_sys::Win32::Foundation::{HANDLE_FLAG_INHERIT, SetHandleInformation};
+        for h in [
+            std::io::stdin().as_raw_handle(),
+            std::io::stdout().as_raw_handle(),
+            std::io::stderr().as_raw_handle(),
+        ] {
+            // SAFETY: the process's own std handles, open for its lifetime; a
+            // null or invalid one makes the call fail, which is ignored.
+            unsafe { SetHandleInformation(h as _, HANDLE_FLAG_INHERIT, 0) };
+        }
     }
     // Its own process group: a harness ending the proxy's group would otherwise
     // end `serve` too, and the client state it keeps between turns.

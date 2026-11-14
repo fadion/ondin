@@ -203,7 +203,9 @@ directly. So the window, which starts the harness, grants each session's level t
   starts. Ending the session revokes the grant at once, on the UI thread, and finishes the rest
   (withdrawing Antigravity's registration, a bounded wait) off it. A revoked grant is kept as
   *ended*, not removed, so a call still arriving from the chat is refused (*This chat has ended:
-  nothing was changed.*) rather than served as an ungranted client's; the last 32 are kept.
+  nothing was changed.*) rather than served as an ungranted client's; the last 32 are kept. A
+  chat's key the window holds no grant for (an earlier run's chat, after a relaunch, or one
+  forgotten past those 32) is refused the same way, by its `assistant-` form.
 - A granted call is written to the agent log (§7).
 
 Left alone: `describe_tools` still describes tools above a chat's level, and a client no grant

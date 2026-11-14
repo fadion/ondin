@@ -376,9 +376,18 @@ impl Engine {
 
     /// Answer one call. A chat granted a level, by its key or by the process
     /// calling, acts under the chat's key, is refused a tool above its level,
-    /// and has the call written to the agent log.
+    /// and has the call written to the agent log. A chat's key this window
+    /// holds no grant for (a chat of an earlier run, or one ended long ago) is
+    /// refused rather than answered as an ungranted client's.
     pub(crate) fn handle(&mut self, docs: &mut impl Documents, mut call: Call) -> Output {
         let Some((key, level)) = self.grants.resolve(call.key.as_deref(), call.pid) else {
+            if call
+                .key
+                .as_deref()
+                .is_some_and(crate::assistant::is_client_key)
+            {
+                return Output::error(access::CHAT_ENDED);
+            }
             return self.answer(docs, call);
         };
         call.key = Some(key.clone());

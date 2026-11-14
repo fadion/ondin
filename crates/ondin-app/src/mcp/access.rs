@@ -167,8 +167,9 @@ impl Grants {
         });
     }
 
-    /// End the chat `key`'s grant; what it still sends is refused, and only the
-    /// last [`ENDED_KEPT`] ended chats are remembered.
+    /// End the chat `key`'s grant; what it still sends is refused. Only the last
+    /// [`ENDED_KEPT`] ended chats are remembered; a chat key forgotten here is
+    /// refused by its form alone.
     pub(crate) fn revoke(&self, key: &str) {
         let mut grants = self.0.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(g) = grants.iter_mut().find(|g| g.key == key) {
@@ -478,5 +479,41 @@ mod tests {
         }
         assert_eq!(grants.resolve(Some("chat-1"), None), None);
         assert!(grants.resolve(Some("k1"), None).is_some());
+    }
+
+    /// A chat's key the window holds no grant for (an earlier run's chat, or
+    /// one forgotten past the cap) is refused; any other key is answered.
+    ///
+    /// flip: `Engine::handle` without its chat-key arm → fails at "refused".
+    #[test]
+    fn an_unknown_chat_key_is_refused() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        let page = docs.session.doc.first_page();
+        let rename = |name: &str| json!({ "node": page.to_wire(), "name": name });
+        let key = Some("assistant-1-1");
+        let open = json!({ "document": "a" });
+        let out = keyed(&mut engine, &mut docs, 1, key, "use_document", open.clone());
+        assert!(out.is_error, "refused");
+        let out = keyed(&mut engine, &mut docs, 2, key, "set_name", rename("x"));
+        assert!(out.is_error, "refused");
+        assert_ne!(docs.session.doc.get(page).unwrap().name(), "x");
+        let other = Some("claude-code");
+        ok(&keyed(
+            &mut engine,
+            &mut docs,
+            3,
+            other,
+            "use_document",
+            open,
+        ));
+        ok(&keyed(
+            &mut engine,
+            &mut docs,
+            4,
+            other,
+            "set_name",
+            rename("y"),
+        ));
+        assert_eq!(docs.session.doc.get(page).unwrap().name(), "y");
     }
 }

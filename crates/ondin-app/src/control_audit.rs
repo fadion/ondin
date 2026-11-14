@@ -393,7 +393,7 @@ fn active_icon_button(g: &Ground) -> bool {
         && g.stroke.color == color::accent()
 }
 
-/// A `ui::layer_chip`: [`ui::CHIP_H`] tall on the accent wash, ringed
+/// A `ui::layer_chip`: `ui::CHIP_H` tall on the accent wash, ringed
 /// `accent_300()` while lit or hovered.
 fn layer_chip(g: &Ground) -> bool {
     (g.rect.height() - ui::CHIP_H).abs() <= SLOP
@@ -944,7 +944,7 @@ fn open_popup_at(ctx: &egui::Context, app: &mut OndinApp, at: egui::Pos2) {
     settle(ctx, app);
 }
 
-/// What `open` brings up, as [`opened`] finds it, and apart from it the
+/// What `open` brings up, as `opened` finds it, and apart from it the
 /// grounds its list rows paint under the pointer: each control `open` added,
 /// hovered in turn. A menu row paints no ground at rest, so only a sweep sees it.
 fn swept(

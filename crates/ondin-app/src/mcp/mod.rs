@@ -4324,6 +4324,24 @@ mod tests {
             )
             .is_error
         );
+        // A text too faint to read is listed without `all`, and counted.
+        // flip: `check_contrast` keeping passes in its default list → fails at
+        // "only the failing one".
+        let faint = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "create_text",
+            json!({ "parent": page, "text": "Faint", "y": 100 }),
+        );
+        let faint = ok(&faint)["created"][0].clone();
+        let fills = json!({ "nodes": [faint], "fills": ["#eeeeee"] });
+        ok(&call(&mut engine, &mut docs, 1, "set_fills", fills));
+        let out = call(&mut engine, &mut docs, 1, "check_contrast", json!({}));
+        let report = ok(&out);
+        assert_eq!(report["failing"], 1, "{report}");
+        let listed = report["findings"].as_array().unwrap();
+        assert_eq!(listed.len(), 1, "only the failing one: {report}");
     }
 
     /// `review_colours` groups two near-identical fills, and `merge_colours`

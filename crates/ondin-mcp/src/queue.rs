@@ -236,6 +236,38 @@ mod tests {
         assert!(!late.take(), "too late to run");
     }
 
+    /// A call the owning end took before the wait ran out, and is still
+    /// running, is answered with its own answer when it comes, never as not run.
+    /// flip: the taken arm of `Forward::call` answering the not-taken error →
+    /// fails at "its own answer".
+    #[test]
+    fn a_taken_call_past_the_wait_is_answered_when_done() {
+        let (to, from) = queue();
+        let owner = std::thread::spawn(move || {
+            let Ok(Request::Call(c)) = from.recv() else {
+                panic!("no call");
+            };
+            assert!(c.take(), "taken in time");
+            std::thread::sleep(Duration::from_millis(600));
+            let _ = c.reply.send(Output::json(json!("done")));
+        });
+        let mut f = Forward {
+            conn: 1,
+            to,
+            pid: None,
+            tools: Vec::new(),
+            all_tools: Vec::new(),
+            lists: None,
+            wait: Duration::from_millis(20),
+        };
+        // A wait the owner's take beats even under load, and a run past it.
+        f.wait = Duration::from_millis(300);
+        let out = f.call(&Peer::default(), "export_png", json!({}));
+        assert!(!out.is_error, "its own answer: {:?}", out.content);
+        assert_eq!(out.structured, Some(json!("done")));
+        owner.join().unwrap();
+    }
+
     /// `tools/list` asks the host's `lists` with the peer's key and the
     /// connection's process before the defaults, and every call carries that
     /// process.

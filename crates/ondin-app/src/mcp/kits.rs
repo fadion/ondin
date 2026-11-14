@@ -402,8 +402,23 @@ fn map_modes(s: &mut EditorSession, call: &Call) -> Result<Answer, String> {
             }
             Some(to_id) => {
                 let to = mode(to_id)
-                    .filter(|m| modes.mode(*m).is_some())
+                    .and_then(|m| modes.mode(m))
                     .ok_or_else(|| format!("`{to_id}` is no mode of that kit"))?;
+                // A kit collection reads one collection of the document's, by
+                // name or else its first; an entry from another is never read.
+                let reads = table.kit_onto(&to.collection).map(|c| c.id);
+                if table.collection_of_mode(from).map(|c| c.id) != reads {
+                    let name = |id| table.collection(id).map(|c| c.name.clone());
+                    return Err(format!(
+                        "`{}` is not read by the kit's `{}`: that reads the document's {}",
+                        serde_json::to_value(from).unwrap_or_default(),
+                        to.name,
+                        reads
+                            .and_then(name)
+                            .map_or("first collection".to_owned(), |n| format!("`{n}`")),
+                    ));
+                }
+                let to = to.id;
                 modes.map.insert(from, to);
             }
             None => return Err("each mapping value is a kit mode id or null".to_owned()),
@@ -461,10 +476,9 @@ fn create_document(docs: &mut impl Documents, call: &Call) -> Result<Value, Stri
 }
 
 /// `make_kit`, `publish_kit` and `stop_sharing_kit`: the kit mark is document
-/// metadata, written and saved at once as the document menu's rows do, outside
-/// undo.
+/// metadata, written by the same functions the document menu's rows end in and
+/// saved at once, outside undo.
 fn mark(docs: &mut impl Documents, path: &Path, call: &Call) -> Result<Answer, String> {
-    use ondin_core::meta::KitMark;
     let s = docs
         .session(path)
         .ok_or_else(|| format!("{} is no longer open", path.display()))?;
@@ -472,60 +486,56 @@ fn mark(docs: &mut impl Documents, path: &Path, call: &Call) -> Result<Answer, S
         return Err(READ_ONLY.to_owned());
     }
     let name = crate::private::document(&s.document_title(), 0).into_owned();
-    let mut meta = s.doc.meta().clone();
-    let shared = meta.kit.as_ref().is_some_and(|k| k.is_shared());
+    let shared = s.doc.meta().kit.as_ref().is_some_and(|k| k.is_shared());
     let (said, answer) = match call.tool.as_str() {
         "make_kit" => {
-            if shared {
-                return Err("This document is already a kit".to_owned());
-            }
-            // A kit is found by its document id, so one without an id is given
-            // one, as filing gives it.
-            if meta.id.is_none() {
-                meta.id = Some(crate::library::ids::mint());
-            }
-            meta.kit.get_or_insert_with(KitMark::default).sharing = true;
-            s.doc.set_meta(meta);
+            crate::kits::mark_kit(s);
             (
                 crate::kits::made_kit_said(&name),
                 json!({ "id": s.doc.meta().id }),
             )
         }
         "stop_sharing_kit" => {
-            let Some(kit) = meta.kit.as_mut().filter(|k| k.is_shared()) else {
+            if !crate::kits::unmark_kit(s) {
                 return Err("This document is not a kit".to_owned());
-            };
-            kit.sharing = false;
-            s.doc.set_meta(meta);
+            }
             (crate::kits::stopped_sharing_said(&name), json!({}))
         }
         _ => {
-            let Some(kit) = meta.kit.as_ref().filter(|k| k.is_shared()) else {
+            if !shared {
                 return Err("This document is not a kit: `make_kit` first".to_owned());
-            };
+            }
+            // As the top bar's *Publish* button, disabled at no change.
             let changes = ondin_core::kit::changes(&s.doc);
-            if kit.version > 0 && !changes.any() {
+            let version = s.doc.meta().kit.as_ref().map_or(0, |k| k.version);
+            if version > 0 && !changes.any() {
                 return Err(format!(
-                    "Nothing changed since v{}: there is nothing to publish",
-                    kit.version
+                    "Nothing changed since v{version}: there is nothing to publish"
                 ));
             }
-            let carried = crate::kits::publish::carried_names(&s.doc);
             let note = call
                 .args
                 .get("note")
                 .and_then(Value::as_str)
                 .map(str::to_owned);
-            let version = ondin_core::kit::publish(&mut s.doc, note, crate::library::clock::now())
-                .ok_or("Nothing here to publish")?;
+            let done = crate::kits::publish::publish_in(s, note)
+                .ok_or(crate::kits::publish::NOTHING_TO_PUBLISH)?;
             (
-                crate::kits::publish::published_said(&name, version, Some(&changes), &carried),
-                json!({ "version": version }),
+                crate::kits::publish::published_said(
+                    &name,
+                    done.version,
+                    Some(&changes),
+                    &done.carried,
+                ),
+                json!({ "version": done.version }),
             )
         }
     };
-    s.mark_unsaved();
-    docs.save(path)?;
+    // The window keeps the change for the person's next save; `serve` drops its
+    // copy. Each host's reason says which.
+    if let Err(why) = docs.save(path) {
+        return Err(format!("The change is not written to the file: {why}"));
+    }
     docs.tell(format!("{said}{}", by(&call.client)));
     Ok(Answer::Json(answer))
 }
@@ -860,6 +870,26 @@ mod tests {
             json!({ "kit": "Nope", "mapping": { (f.night.clone()): null } }),
         );
         assert!(why.contains("holds no modes of a kit"), "{why}");
+        // A mode of a second collection, which the kit's only collection
+        // never reads.
+        ok(e, d, "add_collection", json!({ "name": "Density" }));
+        let other = Documents::session(d, &f.consumer)
+            .unwrap()
+            .doc
+            .variables()
+            .collections()
+            .iter()
+            .find(|c| c.name == "Density")
+            .map(|c| c.modes[0].id)
+            .expect("the new collection's mode");
+        let other = serde_json::to_value(other).unwrap();
+        let why = refused(
+            e,
+            d,
+            "map_kit_modes",
+            json!({ "kit": "Atlas", "mapping": { (other.as_str().unwrap()): dark_wire } }),
+        );
+        assert!(why.contains("is not read by the kit"), "{why}");
         assert_eq!(
             held(d).map.get(&night),
             Some(&dark),

@@ -195,13 +195,7 @@ impl OndinApp {
         // The save below is of `session.doc`, which holds no typed text until
         // the session ends.
         self.finish_text_first();
-        let mut meta = self.session.doc.meta().clone();
-        if meta.id.is_none() {
-            meta.id = Some(crate::library::ids::mint());
-        }
-        meta.kit.get_or_insert_with(KitMark::default).sharing = true;
-        self.session.doc.set_meta(meta);
-        self.session.mark_unsaved();
+        mark_kit(&mut self.session);
         // A failed save's own message stands — the status line has one slot
         // (`D1013`'s fix); the mark is in the document and goes out with the
         // next save that works.
@@ -263,13 +257,9 @@ impl OndinApp {
         }
         // As `make_kit`: the save holds no typed text until the session ends.
         self.finish_text_first();
-        let mut meta = self.session.doc.meta().clone();
-        let Some(kit) = meta.kit.as_mut() else {
+        if !unmark_kit(&mut self.session) {
             return;
-        };
-        kit.sharing = false;
-        self.session.doc.set_meta(meta);
-        self.session.mark_unsaved();
+        }
         // A failed save's own message stands — the status line has one slot
         // (`D1013`'s fix); the mark is in the document and goes out with the
         // next save that works.
@@ -506,6 +496,32 @@ impl OndinApp {
             self.kit_users = None;
         }
     }
+}
+
+/// *Make this a kit* on `s`'s document, before its save: the kit mark set to
+/// sharing, its version kept, and an id minted for a document with none, as
+/// filing mints one. Shared by the menu row and the agent's `make_kit`.
+pub(crate) fn mark_kit(s: &mut crate::session::EditorSession) {
+    let mut meta = s.doc.meta().clone();
+    if meta.id.is_none() {
+        meta.id = Some(crate::library::ids::mint());
+    }
+    meta.kit.get_or_insert_with(KitMark::default).sharing = true;
+    s.doc.set_meta(meta);
+    s.mark_unsaved();
+}
+
+/// *Stop sharing as kit* on `s`'s document, before its save: the mark kept, no
+/// longer sharing. `false`, with nothing changed, when it has no mark.
+pub(crate) fn unmark_kit(s: &mut crate::session::EditorSession) -> bool {
+    let mut meta = s.doc.meta().clone();
+    let Some(kit) = meta.kit.as_mut() else {
+        return false;
+    };
+    kit.sharing = false;
+    s.doc.set_meta(meta);
+    s.mark_unsaved();
+    true
 }
 
 /// The status line after `name` is made a kit.

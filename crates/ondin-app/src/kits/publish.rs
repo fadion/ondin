@@ -371,23 +371,44 @@ impl OndinApp {
         // `open_publish` finished it; this is the verb, and any other caller.
         self.finish_text_first();
         let changes = self.kit_changes();
-        let carried = carried_names(&self.session.doc);
-        let Some(version) = ondin_core::kit::publish(
-            &mut self.session.doc,
-            Some(note),
-            crate::library::clock::now(),
-        ) else {
-            self.session.fail("Nothing here to publish");
+        let Some(done) = publish_in(&mut self.session, Some(note)) else {
+            self.session.fail(NOTHING_TO_PUBLISH);
             return;
         };
-        self.session.mark_unsaved();
         if !self.save_file(false) {
             return;
         }
         let name = self.shown_title();
-        self.session
-            .info(published_said(&name, version, changes.as_ref(), &carried));
+        self.session.info(published_said(
+            &name,
+            done.version,
+            changes.as_ref(),
+            &done.carried,
+        ));
     }
+}
+
+/// Why a publish froze nothing: a kit that never published and holds no main.
+pub(crate) const NOTHING_TO_PUBLISH: &str = "Nothing here to publish";
+
+/// What a publish did, for its status line.
+pub(crate) struct KitPublished {
+    pub(crate) version: u32,
+    /// The draft-page mains it carried, named.
+    pub(crate) carried: Vec<String>,
+}
+
+/// Publish `s`'s kit before its save: freeze, bump and stamp. `None`, with
+/// nothing changed, when there is nothing to freeze. Shared by the publish
+/// popover and the agent's `publish_kit`.
+pub(crate) fn publish_in(
+    s: &mut crate::session::EditorSession,
+    note: Option<String>,
+) -> Option<KitPublished> {
+    let carried = carried_names(&s.doc);
+    let version = ondin_core::kit::publish(&mut s.doc, note, crate::library::clock::now())?;
+    s.mark_unsaved();
+    Some(KitPublished { version, carried })
 }
 
 /// The mains on draft pages a publish of `doc` carries, because a published

@@ -215,7 +215,8 @@ impl Documents for OndinApp {
         match self.save_file(false) {
             true => Ok(()),
             false => Err(format!(
-                "{} could not be saved; the window's status line says why",
+                "{} could not be saved, and the change waits in the open tab for the \
+                 person's next save; the window's status line says why",
                 path.display()
             )),
         }
@@ -245,7 +246,8 @@ impl OndinApp {
         if p.session.disk.as_mut().is_some_and(|s| s.check(path)) {
             p.session.clash = crate::session::Clash::Ask;
             return Err(format!(
-                "{} changed on disk since Ondin read it; the person decides which to keep",
+                "{} changed on disk since Ondin read it; the change waits in its tab and \
+                 the person decides which to keep",
                 path.display()
             ));
         }

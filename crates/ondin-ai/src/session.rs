@@ -8,7 +8,7 @@
 
 use crate::find::{Launch, NotFound, launch, probe};
 use crate::harness::{self, ClaudeFlags, Harness, Seal, TurnSpec};
-use crate::process::Tracker;
+use crate::process::{Tracker, wait_bounded};
 use crate::stream::{LineKind, Parsed, StreamParser};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -849,9 +849,6 @@ impl Inner {
             }
         }
         let code = wait_bounded(&self.tracker, &child, EXIT_GRACE);
-        if let Ok(c) = child.lock() {
-            self.tracker.forget(c.id());
-        }
         let stderr = stderr.join().unwrap_or_default();
         if !ended {
             let ev = self.exited(code, &reader.plain, &stderr);
@@ -1014,9 +1011,6 @@ impl Inner {
             }
         }
         let code = wait_bounded(&self.tracker, &child, EXIT_GRACE);
-        if let Ok(c) = child.lock() {
-            self.tracker.forget(c.id());
-        }
         let turn = {
             let mut st = self.lock();
             if st.generation == generation {
@@ -1147,27 +1141,6 @@ fn collect<R: Read + Send + 'static>(
         }
         String::from_utf8_lossy(&kept).into_owned()
     })
-}
-
-/// Wait up to `grace` for `child` to exit, then kill its tree; its exit code.
-fn wait_bounded(tracker: &Tracker, child: &Mutex<Child>, grace: Duration) -> Option<i32> {
-    let until = Instant::now() + grace;
-    loop {
-        {
-            let mut c = child.lock().unwrap_or_else(|e| e.into_inner());
-            match c.try_wait() {
-                Ok(Some(s)) => return s.code(),
-                Ok(None) if Instant::now() >= until => {
-                    tracker.kill(&mut c);
-                    let _ = c.wait();
-                    return None;
-                }
-                Ok(None) => {}
-                Err(_) => return None,
-            }
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
 }
 
 /// Does a harness's dying output say it is not signed in?

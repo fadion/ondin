@@ -1,11 +1,10 @@
 //! Processes: who owns a leftover, which processes belong to a session, and
 //! starting and ending a harness's children.
 
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
-use std::sync::Arc;
-#[cfg(not(windows))]
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 /// The process that owns something outside its memory: a pid and that pid's
 /// start time, since pids are reissued and a dead owner's pid can come to name
@@ -125,6 +124,10 @@ pub(crate) struct Tracker {
     alive: AtomicBool,
     #[cfg(windows)]
     job: Option<Job>,
+    /// Each live child's own job, nested in `job`, so one child's tree can be
+    /// ended without ending another's still in its grace.
+    #[cfg(windows)]
+    children: Mutex<Vec<(u32, Job)>>,
     /// The session's children; their descendants are found by walking up.
     #[cfg(not(windows))]
     roots: Mutex<Vec<u32>>,
@@ -135,7 +138,9 @@ impl Tracker {
         Arc::new(Tracker {
             alive: AtomicBool::new(true),
             #[cfg(windows)]
-            job: Job::new(),
+            job: Job::new(true),
+            #[cfg(windows)]
+            children: Mutex::new(Vec::new()),
             #[cfg(not(windows))]
             roots: Mutex::new(Vec::new()),
         })
@@ -185,8 +190,9 @@ impl Tracker {
     }
 
     /// Start `cmd` as one of the session's processes, with no console window.
-    /// On Windows it starts suspended and is resumed once it is in the job, so
-    /// nothing it starts can escape before then.
+    /// On Windows it starts suspended and is resumed once it is in its jobs, so
+    /// nothing it starts can escape before then, and `cmd.exe` behind a shim
+    /// never looks a bare command up in its working folder.
     pub(crate) fn spawn(&self, cmd: &mut Command) -> std::io::Result<Child> {
         #[cfg(windows)]
         {
@@ -196,12 +202,19 @@ impl Tracker {
             let Some(job) = &self.job else {
                 return Err(std::io::Error::other("no job object for the session"));
             };
-            cmd.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
+            let Some(own) = Job::new(false) else {
+                return Err(std::io::Error::last_os_error());
+            };
+            cmd.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED)
+                .env("NoDefaultCurrentDirectoryInExePath", "1");
             let mut child = cmd.spawn()?;
-            if let Err(e) = job.adopt(&child) {
+            if let Err(e) = job.adopt(&child, &own) {
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(e);
+            }
+            if let Ok(mut c) = self.children.lock() {
+                c.push((child.id(), own));
             }
             Ok(child)
         }
@@ -218,21 +231,174 @@ impl Tracker {
         }
     }
 
-    /// End one child's tree and forget it as a root.
+    /// End one child's tree (behind an npm shim the agent is a grandchild)
+    /// and forget it as a root.
     pub(crate) fn kill(&self, child: &mut Child) {
-        #[cfg(not(windows))]
+        #[cfg(windows)]
+        if let Ok(c) = self.children.lock()
+            && let Some((_, own)) = c.iter().find(|(p, _)| *p == child.id())
         {
-            kill_group(child.id());
-            self.forget(child.id());
+            own.terminate();
         }
+        #[cfg(not(windows))]
+        kill_group(child.id());
         let _ = child.kill();
+        self.forget(child.id());
     }
 
     /// A child that has exited is no longer a root: its pid may be reissued.
-    pub(crate) fn forget(&self, _pid: u32) {
+    pub(crate) fn forget(&self, pid: u32) {
+        #[cfg(windows)]
+        if let Ok(mut c) = self.children.lock() {
+            c.retain(|(p, _)| *p != pid);
+        }
         #[cfg(not(windows))]
         if let Ok(mut roots) = self.roots.lock() {
-            roots.retain(|p| *p != _pid);
+            roots.retain(|p| *p != pid);
+        }
+    }
+
+    /// How many children are still roots.
+    #[cfg(test)]
+    fn roots(&self) -> usize {
+        #[cfg(windows)]
+        let n = self.children.lock().map_or(0, |c| c.len());
+        #[cfg(not(windows))]
+        let n = self.roots.lock().map_or(0, |r| r.len());
+        n
+    }
+}
+
+/// Wait up to `grace` for `child` to exit, then kill its tree; its exit code.
+/// Either way it is forgotten as a root, since its pid may be reissued.
+pub(crate) fn wait_bounded(
+    tracker: &Tracker,
+    child: &std::sync::Mutex<Child>,
+    grace: std::time::Duration,
+) -> Option<i32> {
+    let until = std::time::Instant::now() + grace;
+    loop {
+        {
+            let mut c = child.lock().unwrap_or_else(|e| e.into_inner());
+            let code = match c.try_wait() {
+                Ok(Some(s)) => Some(s.code()),
+                Ok(None) if std::time::Instant::now() >= until => {
+                    tracker.kill(&mut c);
+                    let _ = c.wait();
+                    Some(None)
+                }
+                Ok(None) => None,
+                Err(_) => Some(None),
+            };
+            if let Some(code) = code {
+                tracker.forget(c.id());
+                return code;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+/// What a helper run printed, once it exited.
+pub(crate) struct Helper {
+    pub status: std::process::ExitStatus,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+}
+
+/// Run a short helper (a `--help` probe, `agy mcp …`, `cursor-agent mcp
+/// enable`) outside any session: in a private empty folder unless the caller
+/// chose one, its tree ended after `timeout`, both pipes drained. `Ok(None)`
+/// when it did not finish in time.
+pub(crate) fn run_bounded(
+    cmd: &mut Command,
+    timeout: std::time::Duration,
+) -> std::io::Result<Option<Helper>> {
+    let scratch = match cmd.get_current_dir() {
+        Some(_) => None,
+        None => Some(Scratch::new()?),
+    };
+    if let Some(s) = &scratch {
+        cmd.current_dir(s.path());
+    }
+    cmd.stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let tracker = Tracker::new();
+    let mut child = tracker.spawn(cmd)?;
+    let drain = |pipe: Option<Box<dyn std::io::Read + Send>>| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut p) = pipe {
+                let _ = p.read_to_end(&mut buf);
+            }
+            let _ = tx.send(buf);
+        });
+        rx
+    };
+    let out = drain(child.stdout.take().map(|p| Box::new(p) as _));
+    let err = drain(child.stderr.take().map(|p| Box::new(p) as _));
+    let child = std::sync::Mutex::new(child);
+    let started = std::time::Instant::now();
+    let status = loop {
+        let mut c = child.lock().unwrap_or_else(|e| e.into_inner());
+        match c.try_wait()? {
+            Some(s) => break Some(s),
+            None if started.elapsed() >= timeout => break None,
+            None => {}
+        }
+        drop(c);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    let Some(status) = status else {
+        wait_bounded(&tracker, &child, std::time::Duration::ZERO);
+        tracker.end();
+        return Ok(None);
+    };
+    // A grandchild left holding a pipe would keep its reader waiting.
+    tracker.end();
+    let read = |rx: std::sync::mpsc::Receiver<Vec<u8>>| {
+        rx.recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap_or_default()
+    };
+    Ok(Some(Helper {
+        status,
+        stdout: read(out),
+        stderr: read(err),
+    }))
+}
+
+/// A helper's working folder, so nothing beside the document Ondin was opened
+/// from is taken for a program or a project file. On Windows a fresh, empty
+/// folder in the person's own temp folder, removed on drop; elsewhere `/`,
+/// since the shared `/tmp` is not the person's alone.
+struct Scratch {
+    path: PathBuf,
+    owned: bool,
+}
+
+impl Scratch {
+    fn new() -> std::io::Result<Scratch> {
+        if cfg!(windows) {
+            let root = std::env::temp_dir().join("ondin-ai-helper");
+            let path = crate::run::make(&root).map_err(std::io::Error::other)?;
+            return Ok(Scratch { path, owned: true });
+        }
+        Ok(Scratch {
+            path: PathBuf::from("/"),
+            owned: false,
+        })
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        if self.owned {
+            let _ = std::fs::remove_dir_all(&self.path);
         }
     }
 }
@@ -243,17 +409,6 @@ fn kill_group(pid: u32) {
     unsafe {
         libc::kill(-(pid as libc::pid_t), libc::SIGKILL);
     }
-}
-
-/// Start a short helper command (a probe, `agy mcp …`) with no console window.
-pub(crate) fn hide_window(cmd: &mut Command) {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000);
-    }
-    #[cfg(not(windows))]
-    let _ = cmd;
 }
 
 /// A Job Object that ends its processes when it is closed.
@@ -269,7 +424,8 @@ unsafe impl Sync for Job {}
 
 #[cfg(windows)]
 impl Job {
-    fn new() -> Option<Job> {
+    /// A new job; `kill_on_close` ends its processes when its handle closes.
+    fn new(kill_on_close: bool) -> Option<Job> {
         use windows_sys::Win32::System::JobObjects::{
             CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
             JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
@@ -282,6 +438,9 @@ impl Job {
                 return None;
             }
             let job = Job(h);
+            if !kill_on_close {
+                return Some(job);
+            }
             let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
             limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
             let set = SetInformationJobObject(
@@ -294,8 +453,9 @@ impl Job {
         }
     }
 
-    /// Put a suspended child in the job, then resume its threads.
-    fn adopt(&self, child: &Child) -> std::io::Result<()> {
+    /// Put a suspended child in this job and then in `own`, which the second
+    /// assignment nests inside this one, then resume its threads.
+    fn adopt(&self, child: &Child, own: &Job) -> std::io::Result<()> {
         use std::os::windows::io::AsRawHandle;
         use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
         use windows_sys::Win32::System::Diagnostics::ToolHelp::{
@@ -308,8 +468,10 @@ impl Job {
         // SAFETY: Win32 calls on the child's handle (borrowed for the call) and
         // on handles opened and closed here; every pointer is a live local.
         unsafe {
-            if AssignProcessToJobObject(self.0, child.as_raw_handle() as _) == 0 {
-                return Err(std::io::Error::last_os_error());
+            for job in [self.0, own.0] {
+                if AssignProcessToJobObject(job, child.as_raw_handle() as _) == 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
             }
             let snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
             if snap == INVALID_HANDLE_VALUE {
@@ -420,5 +582,90 @@ mod tests {
         assert!(!tracker.owns(child.id()));
         let _ = child.kill();
         let _ = child.wait();
+    }
+
+    /// Killing a child started through a `.cmd` ends the program the batch
+    /// file runs too, so its stdout closes at once rather than when it finishes.
+    /// flip: `Tracker::kill` without `own.terminate()` → fails at `stdout closes`.
+    #[cfg(windows)]
+    #[test]
+    fn killing_a_shim_ends_the_program_behind_it() {
+        use std::io::Read;
+        let dir = std::env::temp_dir().join(format!("ondin-ai-kill-{}", crate::run::random_tag()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let shim = dir.join("agent.cmd");
+        std::fs::write(&shim, "@ping -n 30 127.0.0.1\r\n").unwrap();
+        let tracker = Tracker::new();
+        let mut cmd = Command::new(&shim);
+        cmd.stdout(std::process::Stdio::piped())
+            .stdin(std::process::Stdio::null());
+        let mut child = tracker.spawn(&mut cmd).expect("spawn");
+        let mut out = child.stdout.take().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = out.read_to_end(&mut buf);
+            let _ = tx.send(buf);
+        });
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        let killed = std::time::Instant::now();
+        tracker.kill(&mut child);
+        let _ = child.wait();
+        let buf = rx
+            .recv_timeout(std::time::Duration::from_secs(20))
+            .expect("stdout closes");
+        assert!(!buf.is_empty(), "ping was running when it was killed");
+        assert!(
+            killed.elapsed() < std::time::Duration::from_secs(3),
+            "stdout closed {:?} after the kill",
+            killed.elapsed()
+        );
+        assert_eq!(tracker.roots(), 0);
+        tracker.end();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A child reaped by `wait_bounded` is no longer a root, however it ended.
+    /// flip: `wait_bounded` without its `forget` → fails at the first `roots`.
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn a_reaped_child_is_forgotten() {
+        let tracker = Tracker::new();
+        let mut cmd = match cfg!(windows) {
+            true => {
+                let mut c = Command::new("cmd");
+                c.args(["/C", "exit 0"]);
+                c
+            }
+            false => Command::new("true"),
+        };
+        let child = Mutex::new(tracker.spawn(&mut cmd).expect("spawn"));
+        assert_eq!(tracker.roots(), 1);
+        let code = wait_bounded(&tracker, &child, std::time::Duration::from_secs(10));
+        assert_eq!(code, Some(0));
+        assert_eq!(tracker.roots(), 0);
+    }
+
+    /// A helper that does not finish in time is ended and reported as such.
+    /// flip: `run_bounded` without its timeout arm → the test hangs ~30 s.
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn a_helper_past_its_timeout_is_ended() {
+        let mut cmd = match cfg!(windows) {
+            true => {
+                let mut c = Command::new("cmd");
+                c.args(["/C", "ping -n 30 127.0.0.1"]);
+                c
+            }
+            false => {
+                let mut c = Command::new("sleep");
+                c.arg("30");
+                c
+            }
+        };
+        let started = std::time::Instant::now();
+        let r = run_bounded(&mut cmd, std::time::Duration::from_millis(500)).expect("spawned");
+        assert!(r.is_none());
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
     }
 }

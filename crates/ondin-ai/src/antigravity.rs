@@ -19,6 +19,7 @@ use crate::harness::{
 };
 use crate::process::Owner;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// Where Antigravity keeps its permissions (under `.gemini`: it shares that
 /// root with Google's earlier CLI). `ONDIN_AGY_SETTINGS` overrides it, so a
@@ -150,17 +151,19 @@ fn next_nonce() -> u64 {
     u64::from_str_radix(&crate::run::random_tag(), 16).unwrap_or(1)
 }
 
-/// Run `agy mcp …`, its output discarded.
+/// How long one `agy mcp …` may take before it is ended as failed: a session
+/// ends on the thread that drops it, and agy may stop at a sign-in or update.
+const AGY_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Run `agy mcp …`, its output discarded; `true` when it succeeded in time.
 fn agy_mcp(launch: &Launch, args: &[&str]) -> bool {
     let mut c = launch.command();
     c.arg("mcp")
         .args(args)
         .env(crate::AGENT_CHILD_ENV, "1")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    crate::process::hide_window(&mut c);
-    c.status().is_ok_and(|s| s.success())
+        .stdin(std::process::Stdio::null());
+    crate::process::run_bounded(&mut c, AGY_TIMEOUT)
+        .is_ok_and(|h| h.is_some_and(|h| h.status.success()))
 }
 
 /// Antigravity's registration and allow-rules for one session, withdrawn on drop.

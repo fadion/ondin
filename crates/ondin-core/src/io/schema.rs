@@ -263,7 +263,7 @@ pub(crate) struct NodeDto {
     #[serde(default = "clips_by_default")]
     pub clip: bool,
     /// Whether exports leave the frame's fills out. Additive, off by default and
-    /// skipped when off, as `mask` (invariant 9).
+    /// skipped when off, as `mask` (invariant 9). New in v16.
     #[serde(default, skip_serializing_if = "is_false")]
     pub fill_hidden_in_export: bool,
     /// Whether the node masks the siblings above it (§5.3). Additive; unlike

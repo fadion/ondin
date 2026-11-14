@@ -43,6 +43,7 @@ pub(crate) fn migrate(mut value: Value) -> Result<Value, IoError> {
             12 => migrate_12_to_13(&mut value),
             13 => migrate_13_to_14(&mut value),
             14 => migrate_14_to_15(&mut value),
+            15 => migrate_15_to_16(&mut value),
             other => return Err(IoError::UnsupportedVersion(other)),
         }
     }
@@ -423,6 +424,21 @@ fn migrate_14_to_15(value: &mut Value) {
     {
         inner["schema_version"] = Value::from(15u32);
         set_element_onto_roots(inner);
+    }
+}
+
+/// v15 → v16: a frame's fill left out of exports (`NodeDto::fill_hidden_in_export`).
+/// A number and nothing else: a v15 file holds none. The bump is for the older
+/// build, which would drop the flag and save the fill back into every export.
+/// The published document's number moves too.
+fn migrate_15_to_16(value: &mut Value) {
+    value["schema_version"] = Value::from(16u32);
+    if let Some(inner) = value
+        .get_mut("published")
+        .and_then(|p| p.get_mut("document"))
+        .filter(|d| d.is_object())
+    {
+        inner["schema_version"] = Value::from(16u32);
     }
 }
 

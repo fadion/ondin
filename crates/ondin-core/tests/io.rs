@@ -991,6 +991,58 @@ fn a_fill_hidden_in_export_round_trips_and_is_absent_while_off() {
     assert_eq!(doc, loaded);
 }
 
+/// A file carrying the export-fill flag is v16, so a v15 build refuses it rather
+/// than dropping the flag; a v15 file loads and saves as v16 with nothing else moved.
+/// flip: `CURRENT_SCHEMA_VERSION` left at 15 → fails at "saved as v16".
+#[test]
+fn the_export_fill_flag_is_a_v16_field_and_a_v15_file_climbs_to_it() {
+    let (mut doc, root) = rich_document();
+    let frame = doc.get(root).unwrap().children()[0];
+    doc.apply(&Transaction(vec![Operation::SetFillHiddenInExport {
+        id: frame,
+        hidden: true,
+    }]))
+    .unwrap();
+    let saved: serde_json::Value = serde_json::from_slice(&io::save(&doc).unwrap()).unwrap();
+    assert_eq!(
+        saved["schema_version"],
+        serde_json::json!(16),
+        "saved as v16"
+    );
+
+    let (plain, _) = rich_document();
+    let mut old: serde_json::Value = serde_json::from_slice(&io::save(&plain).unwrap()).unwrap();
+    old["schema_version"] = serde_json::json!(15);
+    let loaded = io::load(&serde_json::to_vec(&old).unwrap()).unwrap();
+    assert_eq!(loaded.schema_version(), 16);
+    assert_eq!(loaded, plain, "a number-only step");
+}
+
+/// The export-fill flag on a kind with no frame is inert and never reaches the
+/// file, so a file with no edit cannot move.
+/// flip: the writer's `&& n.kind().clips_children()` removed → fails at "a group's record".
+#[test]
+fn an_inert_fill_hidden_in_export_never_reaches_the_file() {
+    let (mut doc, root) = rich_document();
+    let ab = doc.get(root).unwrap().children()[0];
+    let group = doc.get(ab).unwrap().children()[0];
+    assert!(
+        matches!(doc.get(group).unwrap().kind(), NodeKind::Group),
+        "fixture: a kind that cannot clip"
+    );
+    let before = io::save(&doc).unwrap();
+    doc.apply(&Transaction(vec![Operation::SetFillHiddenInExport {
+        id: group,
+        hidden: true,
+    }]))
+    .expect("the op accepts an inert flag");
+    assert!(doc.get(group).unwrap().fill_hidden_in_export());
+    let after = io::save(&doc).unwrap();
+    let text = String::from_utf8(after.clone()).unwrap();
+    assert!(!text.contains("fill_hidden_in_export"), "a group's record");
+    assert!(before == after, "the bytes did not move");
+}
+
 /// The proportion lock is additive in the same way, and its default is the one
 /// that needs no argument: while the lock was session state no file recorded it,
 /// so every node in every existing file meant "unlocked".

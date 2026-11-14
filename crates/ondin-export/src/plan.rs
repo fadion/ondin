@@ -296,6 +296,22 @@ pub fn origins_of(doc: &Document, res: &Resolved, node: NodeId) -> Vec<NodeId> {
     }
 }
 
+/// Every layer a file of `node` under `spec` draws: its origins, and for an icon
+/// drawing sizes from their own frames, those frames. What `for_export` strips,
+/// so a file and its preview leave out the same fills.
+pub fn drawn_roots(doc: &Document, res: &Resolved, node: NodeId, spec: &ExportSpec) -> Vec<NodeId> {
+    let mut roots = origins_of(doc, res, node);
+    if spec.format.is_icon() && spec.size_frames && slice_region(doc, res, node).is_none() {
+        let sizes = spec.icon_sizes();
+        roots.extend(
+            crate::icon::size_frames(doc, node, &sizes)
+                .into_iter()
+                .map(|(_, f)| f),
+        );
+    }
+    roots
+}
+
 /// Render one planned file to bytes. `None` when the layer has no bounds to
 /// frame — the one refusal both writers already make.
 ///
@@ -304,7 +320,7 @@ pub fn origins_of(doc: &Document, res: &Resolved, node: NodeId) -> Vec<NodeId> {
 /// (§15 D264). Nothing here can check that.
 pub fn render(doc: &Document, res: &Resolved, file: &PlannedFile) -> Option<Vec<u8>> {
     // Once at most: the copy holds no fill left to take off.
-    if let Some((doc, res)) = for_export(doc, &origins_of(doc, res, file.node)) {
+    if let Some((doc, res)) = for_export(doc, &drawn_roots(doc, res, file.node, &file.spec)) {
         return render(&doc, &res, file);
     }
     // A slice's box included: `svg_spec` frames it as it frames anything else.

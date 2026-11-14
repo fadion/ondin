@@ -213,6 +213,35 @@ fn a_pixel_fitted_size_has_no_partial_pixels() {
     assert_eq!(doc, before);
 }
 
+/// A locked layer is pixel-fitted all the same: the fit is the export's copy,
+/// not an edit the lock keeps off it.
+/// flip: `icon::fitted` calling `pixel_fit::fit_on` → fails at "fitted though locked".
+#[test]
+fn a_locked_layer_is_pixel_fitted_too() {
+    let (mut doc, _, logo, _) = fixture();
+    doc.apply(&ondin_core::Transaction(vec![
+        ondin_core::Operation::SetLocked {
+            id: logo,
+            locked: true,
+        },
+    ]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    let spec = ExportSpec {
+        sizes: vec![16],
+        pixel_fit: true,
+        ..ico()
+    };
+    let e = icon::entries(&doc, &res, logo, &spec).expect("entries");
+    let partial = e[0]
+        .raster
+        .rgba
+        .chunks(4)
+        .filter(|p| p[3] != 0 && p[3] != 255)
+        .count();
+    assert_eq!(partial, 0, "fitted though locked");
+}
+
 /// A background fills the padding too, and trimming a box that is all ink changes
 /// next to nothing.
 #[test]

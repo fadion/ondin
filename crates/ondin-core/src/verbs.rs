@@ -225,7 +225,12 @@ fn loosened<'v>(p: &Param, v: &'v Value) -> std::borrow::Cow<'v, Value> {
             {
                 v = parsed;
             }
-            loose::loosen(model_key(model, p.name), &mut v);
+            // A short form written wrong is left as written, for the check to
+            // refuse with its reason.
+            let written = v.clone();
+            if loose::loosen_strict(model_key(model, p.name), &mut v).is_err() {
+                return std::borrow::Cow::Owned(written);
+            }
             // What `settle` puts right reaches the verb, not only the check.
             if let Ok(settled) = settled_model(model, &v) {
                 v = settled;
@@ -458,7 +463,7 @@ pub fn check_model(model: &str, v: &Value) -> Result<(), String> {
 fn settled_model(model: &str, v: &Value) -> Result<Value, String> {
     let mut loose = v.clone();
     if model != "DtcgFile" {
-        loose::loosen(model_key(model, ""), &mut loose);
+        loose::loosen_strict(model_key(model, ""), &mut loose)?;
     }
     let v = &loose;
     macro_rules! reads {
@@ -588,7 +593,7 @@ fn attempt<T: serde::de::DeserializeOwned>(v: &Value) -> Result<T, Miss> {
             why: e.into_inner().to_string(),
         }
     })?;
-    match unknown.into_iter().next() {
+    match unknown.into_iter().next().or_else(|| unseen_field(v)) {
         None => Ok(t),
         Some(steps) => Err(Miss {
             steps,
@@ -596,6 +601,63 @@ fn attempt<T: serde::de::DeserializeOwned>(v: &Value) -> Result<T, Miss> {
             why: String::new(),
         }),
     }
+}
+
+/// The path of a field `serde_ignored` cannot see: one inside a gradient brush,
+/// whose `#[serde(flatten)]` drops what it does not read, or inside an untagged
+/// grid track (`minmax` or `repeat`). `None` when there is none.
+fn unseen_field(v: &Value) -> Option<Vec<Option<Step>>> {
+    fn walk(v: &Value, key: &str, at: &mut Vec<Option<Step>>) -> Option<Vec<Option<Step>>> {
+        match v {
+            Value::Object(map) => {
+                let allowed: Option<Vec<&str>> = match key {
+                    "Gradient" => struct_fields::<peniko::Gradient>().map(|f| {
+                        let mut f = f.to_vec();
+                        f.extend(["transform", "opacity"]);
+                        f
+                    }),
+                    "track" if map.contains_key("repeat") => Some(vec!["repeat", "tracks"]),
+                    "track" if map.contains_key("min") || map.contains_key("max") => {
+                        Some(vec!["min", "max"])
+                    }
+                    _ => None,
+                };
+                if let Some(allowed) = allowed
+                    && let Some(extra) = map.keys().find(|k| !allowed.contains(&k.as_str()))
+                {
+                    let mut path = at.clone();
+                    path.push(Some(Step::Key(extra.clone())));
+                    return Some(path);
+                }
+                for (k, child) in map {
+                    at.push(Some(Step::Key(k.clone())));
+                    let found = walk(child, k, at);
+                    at.pop();
+                    if found.is_some() {
+                        return found;
+                    }
+                }
+                None
+            }
+            Value::Array(items) => {
+                let item_key = match key {
+                    "columns" | "rows" | "tracks" => "track",
+                    _ => "",
+                };
+                for (i, item) in items.iter().enumerate() {
+                    at.push(Some(Step::Index(i)));
+                    let found = walk(item, item_key, at);
+                    at.pop();
+                    if found.is_some() {
+                        return found;
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+    walk(v, "", &mut Vec::new())
 }
 
 /// `v` as a `T` reads it once the slips an agent makes are put right: an enum
@@ -1131,6 +1193,7 @@ fn model_key<'a>(model: &str, param: &'a str) -> &'a str {
         "TextStyle" => "style",
         "[Fill]" => "fills",
         "[Stroke]" => "strokes",
+        "[Effect]" => "effects",
         _ => param,
     }
 }
@@ -1452,6 +1515,58 @@ fn bakes_rounding(ctx: &Ctx<'_>, id: NodeId, patch: &GeometryPatch) -> bool {
     points(written, &[]).into_iter().any(|p| near(&fillets, p))
 }
 
+/// A path patch written without `corner_radii` keeps the rounded path's radii
+/// while the outline has as many points, and is refused naming them when it does
+/// not: the short forms read radii left out as none, which would clear them.
+fn keep_radii(
+    ctx: &Ctx<'_>,
+    a: &Args<'_>,
+    id: NodeId,
+    patch: &mut GeometryPatch,
+) -> Result<(), VerbError> {
+    let GeometryPatch::Path {
+        path: written,
+        corner_radii,
+        ..
+    } = patch
+    else {
+        return Ok(());
+    };
+    let named = match a.get("geometry") {
+        Some(Value::Object(g)) => g
+            .get("Path")
+            .and_then(Value::as_object)
+            .is_some_and(|p| p.contains_key("corner_radii")),
+        Some(Value::String(s)) => s.contains("corner_radii"),
+        _ => false,
+    };
+    let Some(NodeKind::Path {
+        path,
+        corner_radii: own,
+        ..
+    }) = ctx.doc.get(id).map(|n| n.kind())
+    else {
+        return Ok(());
+    };
+    if named || own.iter().all(|r| *r <= 0.0) {
+        return Ok(());
+    }
+    let count = |p: &kurbo::BezPath| -> usize {
+        crate::edit::pen_anchors(p, &[])
+            .iter()
+            .map(|s| s.anchors.len())
+            .sum()
+    };
+    if count(written) != count(path) {
+        return Err(a.invalid(
+            "geometry",
+            "the path's corners are rounded and the outline has another number of points; give `corner_radii`, one per point, to say which keep their rounding",
+        ));
+    }
+    *corner_radii = own.clone();
+    Ok(())
+}
+
 /// A style's value as a caller writes it: the lists as the single-layer verbs take
 /// them, with no item ids, which the verb keys.
 #[derive(serde::Deserialize, Debug)]
@@ -1614,6 +1729,15 @@ fn existing_layers(ctx: &Ctx<'_>, a: &Args<'_>) -> Result<Vec<NodeId>, VerbError
     Ok(ids)
 }
 
+/// `tx` as the verb's edit, refused as `why` when it writes nothing, so an agent
+/// is never told of a write that did not land.
+fn nothing_if_empty(tx: Transaction, why: &'static str) -> Result<Done, VerbError> {
+    match tx.0.is_empty() {
+        true => Err(VerbError::Nothing(why)),
+        false => Ok(Done::edit(tx)),
+    }
+}
+
 /// The layers the `nodes` argument names, refused when none of them reaches a
 /// layer that takes paint (`build::paint_targets`): an empty group, or slices,
 /// would otherwise answer as done with nothing painted.
@@ -1766,6 +1890,37 @@ fn char_range(a: &Args<'_>, content: &str) -> Result<(std::ops::Range<usize>, bo
     Ok((byte(start)..byte(end), start == 0 && end == chars))
 }
 
+/// `spans`, written in characters as the snapshot reads runs, as the byte ranges
+/// of `content` the model keeps; one past the text is refused.
+fn spans_in_bytes(
+    a: &Args<'_>,
+    name: &'static str,
+    content: &str,
+    spans: CharSpans,
+    style: &TextStyle,
+) -> Result<CharSpans, VerbError> {
+    let chars = content.chars().count();
+    let byte = |n: usize| {
+        content
+            .char_indices()
+            .nth(n)
+            .map_or(content.len(), |(b, _)| b)
+    };
+    let mut out = Vec::new();
+    for s in spans.as_slice() {
+        if s.start > s.end || s.end > chars {
+            let why = format!("a run ends past the text, which has {chars} characters");
+            return Err(a.invalid(name, why));
+        }
+        out.push(crate::typography::Span {
+            start: byte(s.start),
+            end: byte(s.end),
+            attr: s.attr.clone(),
+        });
+    }
+    Ok(CharSpans::from_parts(out, style))
+}
+
 /// A page's `name` trimmed, as the pages list keeps it; an empty one is refused.
 fn page_name<'n>(a: &Args<'_>, name: &'n str) -> Result<&'n str, VerbError> {
     match name.trim() {
@@ -1895,7 +2050,13 @@ pub static VERBS: &[Verb] = &[
         name: "delete_node",
         doc: "Delete layers, with their frames' guides; instances of a deleted main are detached",
         params: &[req("nodes", NODES, "the layers to delete")],
-        run: |ctx, a| Ok(Done::edit(build::delete(ctx.doc, &a.nodes("nodes")?))),
+        run: |ctx, a| {
+            let ids = a.nodes("nodes")?;
+            for id in &ids {
+                node(ctx, *id)?;
+            }
+            nothing_if_empty(build::delete(ctx.doc, &ids), "nothing to delete")
+        },
     },
     Verb {
         name: "duplicate",
@@ -2025,10 +2186,21 @@ pub static VERBS: &[Verb] = &[
                     *name = Some(given.to_owned());
                 }
             }
+            // As the app's import says it: what is missing, then what is there
+            // and slightly wrong.
+            out.skipped.sort();
+            out.approximated.sort();
+            let mut said = Vec::new();
+            if !out.skipped.is_empty() {
+                said.push(format!("Left out: {}", out.skipped.join(", ")));
+            }
+            if !out.approximated.is_empty() {
+                said.push(format!("Approximated: {}", out.approximated.join(", ")));
+            }
             let done = Done::made(out.tx, vec![root]);
-            Ok(match out.skipped.is_empty() {
+            Ok(match said.is_empty() {
                 true => done,
-                false => done.saying(format!("Left out: {}", out.skipped.join(", "))),
+                false => done.saying(said.join("; ")),
             })
         },
     },
@@ -2046,7 +2218,11 @@ pub static VERBS: &[Verb] = &[
         ],
         run: |ctx, a| {
             let (id, parent) = (a.node("node")?, a.node("parent")?);
-            let count = node(ctx, parent)?.children().len();
+            let mut count = node(ctx, parent)?.children().len();
+            // Within its own parent the layer's place is counted without it.
+            if node(ctx, id)?.parent() == Some(parent) {
+                count -= 1;
+            }
             let index = a.index("index").unwrap_or(count).min(count);
             Ok(Done::edit(build::reparent_preserving_world(
                 ctx.doc, ctx.res, id, parent, index,
@@ -2081,7 +2257,12 @@ pub static VERBS: &[Verb] = &[
                 Some("backward") => ZMove::Backward,
                 _ => ZMove::Back,
             };
-            Ok(Done::edit(build::z_order(ctx.doc, &a.nodes("nodes")?, mv)))
+            let ids = existing_layers(ctx, a)?;
+            let already = match mv {
+                ZMove::Front | ZMove::Forward => "already at the front",
+                ZMove::Backward | ZMove::Back => "already at the back",
+            };
+            nothing_if_empty(build::z_order(ctx.doc, &ids, mv), already)
         },
     },
     Verb {
@@ -2098,7 +2279,7 @@ pub static VERBS: &[Verb] = &[
         doc: "Wrap layers in a new frame sized to them, with no fill and no clip; answers the frame",
         params: &[req("nodes", NODES, "the layers to frame; one is enough")],
         run: |ctx, a| {
-            let nodes = a.layers(ctx.doc, "nodes")?;
+            let nodes = existing_layers(ctx, a)?;
             if !build::can_frame(ctx.doc, &nodes) {
                 let parents: std::collections::HashSet<NodeId> = nodes
                     .iter()
@@ -2385,12 +2566,14 @@ pub static VERBS: &[Verb] = &[
                 Some("horizontal") => Axis::X,
                 _ => Axis::Y,
             };
-            Ok(Done::edit(build::distribute(
-                ctx.doc,
-                ctx.res,
-                &a.nodes("nodes")?,
-                axis,
-            )))
+            let ids = existing_layers(ctx, a)?;
+            if ids.len() < 3 {
+                return Err(VerbError::Nothing("distribute needs three or more layers"));
+            }
+            nothing_if_empty(
+                build::distribute(ctx.doc, ctx.res, &ids, axis),
+                "already evenly spaced",
+            )
         },
     },
     Verb {
@@ -2778,9 +2961,10 @@ pub static VERBS: &[Verb] = &[
                 Some("order") => crate::reset::Kind::Order,
                 _ => crate::reset::Kind::All,
             };
-            Ok(Done::ops(crate::reset::stated(
-                ctx.doc, kind, &scopes, ctx.ids,
-            )))
+            nothing_if_empty(
+                Transaction(crate::reset::stated(ctx.doc, kind, &scopes, ctx.ids)),
+                "nothing here differs from the main component",
+            )
         },
     },
     Verb {
@@ -4093,7 +4277,8 @@ pub static VERBS: &[Verb] = &[
         ],
         run: |ctx, a| {
             let id = a.node("node")?;
-            let geometry = a.model::<GeometryPatch>("geometry")?;
+            let mut geometry = a.model::<GeometryPatch>("geometry")?;
+            keep_radii(ctx, a, id, &mut geometry)?;
             if bakes_rounding(ctx, id, &geometry) {
                 return Err(a.invalid(
                     "geometry",
@@ -4308,6 +4493,11 @@ pub static VERBS: &[Verb] = &[
             };
             let mut ops = Vec::new();
             for id in a.layers(ctx.doc, "nodes")? {
+                // A mask leaves its container's flow, so it is written where it
+                // is drawn first, as *Use as mask* does (`build::mask`).
+                if mask && !node(ctx, id)?.mask() {
+                    ops.extend(build::baked(ctx.doc, ctx.res, id));
+                }
                 ops.push(Operation::SetMask { id, mask });
                 if let Some(mode) = mode
                     && node(ctx, id)?.mask_mode() != mode
@@ -4594,11 +4784,10 @@ pub static VERBS: &[Verb] = &[
                 flag("keep_case"),
             )
             .map_err(|why| a.invalid("find", why))?;
+            // No page is in view here, so no draft is searched unless named.
             let scope = match a.get("nodes") {
                 Some(_) => Scope::Under(a.nodes("nodes")?),
-                None => Scope::Pages {
-                    here: ctx.doc.first_page(),
-                },
+                None => Scope::Under(ctx.doc.gathered_pages().collect()),
             };
             let hits = find::find(ctx.doc, &scope, &query);
             let done = find::replace(ctx.doc, &hits, &query, flag("inside_instances"));
@@ -4648,7 +4837,8 @@ pub static VERBS: &[Verb] = &[
             }
             let mut ops = Vec::new();
             for id in ids {
-                let Some(NodeKind::Text { style, .. }) = ctx.doc.get(id).map(|n| n.kind()) else {
+                let Some(NodeKind::Text { style, content, .. }) = ctx.doc.get(id).map(|n| n.kind())
+                else {
                     continue;
                 };
                 let mut whole = serde_json::to_value(style.as_ref()).unwrap_or_default();
@@ -4658,11 +4848,11 @@ pub static VERBS: &[Verb] = &[
                 let style = settle::<TextStyle>("TextStyle", whole)
                     .and_then(|v| read_model::<TextStyle>(&v))
                     .map_err(|why| a.invalid("style", why))?;
-                ops.push(Operation::SetTextStyle {
-                    id,
-                    style,
-                    spans: spans.clone(),
-                });
+                let spans = match &spans {
+                    Some(s) => Some(spans_in_bytes(a, "spans", content, s.clone(), &style)?),
+                    None => None,
+                };
+                ops.push(Operation::SetTextStyle { id, style, spans });
             }
             Ok(Done::ops(ops))
         },
@@ -4672,12 +4862,18 @@ pub static VERBS: &[Verb] = &[
         doc: "Set a text layer's runs of character styling",
         params: &[
             req("node", NODE, "the text layer"),
-            req("spans", ParamKind::Model("CharSpans"), "the runs"),
+            req(
+                "spans",
+                ParamKind::Model("CharSpans"),
+                "the runs, counted in its characters",
+            ),
         ],
-        run: |_, a| {
+        run: |ctx, a| {
+            let (t, content) = text_of(ctx, a)?;
+            let spans = spans_in_bytes(a, "spans", content, a.model("spans")?, t.style)?;
             Ok(Done::ops(vec![Operation::SetTextSpans {
                 id: a.node("node")?,
-                spans: a.model("spans")?,
+                spans,
             }]))
         },
     },

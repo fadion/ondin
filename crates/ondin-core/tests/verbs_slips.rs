@@ -28,11 +28,20 @@ fn answer(doc: &Document, ids: &mut IdSource, name: &str, args: &Value) -> Resul
     )
 }
 
-/// Run `name` with `args` and commit it; answers what it created.
+/// Run `name` with `args` and commit it, checking its undo and redo land where
+/// they should; answers what it created.
 fn run(doc: &mut Document, ids: &mut IdSource, name: &str, args: Value) -> Done {
     let done = answer(doc, ids, name, &args).unwrap_or_else(|e| panic!("{name}: {e}"));
-    doc.apply(&done.tx)
-        .unwrap_or_else(|e| panic!("{name} commits: {e}"));
+    let before = doc.clone();
+    let undo = doc
+        .apply(&done.tx)
+        .unwrap_or_else(|e| panic!("{name} commits: {e}"))
+        .inverse;
+    let after = doc.clone();
+    let redo = doc.apply_restoring(&undo).expect("undo").inverse;
+    assert!(*doc == before, "{name}: undo restores the document");
+    doc.apply_restoring(&redo).expect("redo");
+    assert!(*doc == after, "{name}: redo restores the edit");
     done
 }
 
@@ -175,9 +184,9 @@ fn a_model_parameter_sent_as_json_text_is_read() {
 
 /// A stroke as a bare colour or with `color`, a fill with `color` and `opacity`,
 /// padding as two numbers, a text without its sizing, a star without its ratio
-/// and a geometry as path data alone are all taken.
+/// and a geometry as path data alone are all taken, and stored as they mean.
 ///
-/// flip: `loosen_paint` refusing a bare stroke colour again → fails at "strokes".
+/// flip: `loosen`'s two-number padding read as [horizontal, vertical] → fails at "padding".
 #[test]
 fn the_short_forms_agents_write_are_taken() {
     let (mut doc, mut ids, page) = blank();
@@ -189,40 +198,60 @@ fn the_short_forms_agents_write_are_taken() {
         json!({ "parent": f.to_wire(), "kind": { "Rect": { "size": { "width": 10, "height": 10 } } } }),
     )
     .created[0];
-    let ok = |doc: &Document, ids: &mut IdSource, name: &str, args: Value| {
-        let done = answer(doc, ids, name, &args);
-        assert!(done.is_ok(), "{name} {args}: {done:?}");
-    };
+    let stored = |doc: &Document, id: NodeId| json!({ "kind": serde_json::to_value(doc.get(id).unwrap().kind()).unwrap() });
     let n = json!([r.to_wire()]);
-    ok(
-        &doc,
+    let dark = ondin_core::peniko::Color::from_rgb8(0x12, 0x35, 0x2a);
+    run(
+        &mut doc,
         &mut ids,
         "set_strokes",
         json!({ "nodes": n, "strokes": ["#12352a"] }),
     );
-    ok(
-        &doc,
+    let strokes = &doc.get(r).unwrap().paint().strokes;
+    assert_eq!(
+        strokes[0].brush,
+        ondin_core::Brush::Solid(dark).into(),
+        "strokes"
+    );
+    assert_eq!(strokes[0].width, 1.0);
+    run(
+        &mut doc,
         &mut ids,
         "set_strokes",
         json!({ "nodes": n, "strokes": [{ "color": "#12352a", "width": 2 }] }),
     );
-    ok(
-        &doc,
+    assert_eq!(doc.get(r).unwrap().paint().strokes[0].width, 2.0, "a width");
+    run(
+        &mut doc,
         &mut ids,
         "set_fills",
         json!({ "nodes": n, "fills": [{ "color": "#1a76ff", "opacity": 0.5 }] }),
     );
-    ok(
-        &doc,
+    let fill = serde_json::to_value(&doc.get(r).unwrap().paint().fills[0]).unwrap();
+    let alpha = fill["brush"]["Solid"]["components"][3].as_f64().unwrap();
+    assert!((alpha - 0.5).abs() < 0.01, "an opacity folded: {fill}");
+    run(
+        &mut doc,
         &mut ids,
         "set_display",
         json!({ "nodes": [f.to_wire()], "display": { "Flex": { "padding": [16, 24] } } }),
     );
-    ok(
-        &doc,
+    let flex = serde_json::to_value(doc.get(f).unwrap().display()).unwrap();
+    assert_eq!(
+        flex["Flex"]["padding"],
+        json!([16.0, 24.0, 16.0, 24.0]),
+        "padding"
+    );
+    run(
+        &mut doc,
         &mut ids,
         "set_geometry",
         json!({ "node": r.to_wire(), "geometry": { "CornerRadius": 4 } }),
+    );
+    assert_eq!(
+        stored(&doc, r)["kind"]["Rect"]["corner_radii"]["top_left"],
+        json!(4.0),
+        "a corner radius"
     );
     let p = run(
         &mut doc,
@@ -231,14 +260,18 @@ fn the_short_forms_agents_write_are_taken() {
         json!({ "parent": f.to_wire(), "kind": { "Path": { "path": "M0,0 L10,0 L5,8 Z" } } }),
     )
     .created[0];
-    ok(
-        &doc,
+    run(
+        &mut doc,
         &mut ids,
         "set_geometry",
         json!({ "node": p.to_wire(), "geometry": "M0,0 L20,0 L10,16 Z" }),
     );
-    ok(
-        &doc,
+    let NodeKind::Path { path, .. } = doc.get(p).unwrap().kind() else {
+        panic!("a path");
+    };
+    assert_eq!(path.to_svg(), "M0,0 L20,0 L10,16 Z", "path data alone");
+    run(
+        &mut doc,
         &mut ids,
         "set_geometry",
         json!({ "node": p.to_wire(), "geometry": { "Path": { "path": "M0,0 L20,0 Z" } } }),
@@ -247,12 +280,241 @@ fn the_short_forms_agents_write_are_taken() {
         { "kind": { "Text": { "content": "Hi", "style": { "font_size": 14 } } } },
         { "kind": { "Star": { "size": { "width": 10, "height": 10 } } } },
     ] });
-    ok(
-        &doc,
+    let g = run(
+        &mut doc,
         &mut ids,
         "insert_subtree",
         json!({ "parent": f.to_wire(), "tree": tree }),
+    )
+    .created[0];
+    let kids = doc.get(g).unwrap().children().to_vec();
+    assert!(matches!(
+        doc.get(kids[0]).unwrap().kind(),
+        NodeKind::Text {
+            sizing: ondin_core::TextSizing::Auto,
+            ..
+        }
+    ));
+    assert_eq!(
+        stored(&doc, kids[1])["kind"]["Star"]["inner_ratio"],
+        json!(0.382)
     );
+}
+
+/// A rounded path's outline written short keeps its corners' radii while it has
+/// as many points, and is refused naming `corner_radii` when it has not.
+/// flip: `keep_radii` returning at once → fails at "the radii stay".
+#[test]
+fn a_rounded_paths_short_outline_keeps_its_radii() {
+    let (mut doc, mut ids, page) = blank();
+    let f = frame_on(&mut doc, &mut ids, page);
+    let square = "M0,0 L100,0 L100,100 L0,100 Z";
+    let p = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": f.to_wire(), "kind": { "Path": { "path": square, "corner_radii": [10, 10, 10, 10] } } }),
+    )
+    .created[0];
+    let radii = |doc: &Document| match doc.get(p).unwrap().kind() {
+        NodeKind::Path { corner_radii, .. } => corner_radii.clone(),
+        _ => panic!("a path"),
+    };
+    assert_eq!(radii(&doc), vec![10.0; 4], "the fixture");
+    for geometry in [json!(square), json!({ "Path": square })] {
+        run(
+            &mut doc,
+            &mut ids,
+            "set_geometry",
+            json!({ "node": p.to_wire(), "geometry": geometry }),
+        );
+        assert_eq!(radii(&doc), vec![10.0; 4], "the radii stay: {geometry}");
+    }
+    let fewer = why(
+        &doc,
+        &mut ids,
+        "set_geometry",
+        json!({ "node": p.to_wire(), "geometry": "M0,0 L100,0 L50,100 Z" }),
+    );
+    assert!(fewer.contains("corner_radii"), "{fewer}");
+    run(
+        &mut doc,
+        &mut ids,
+        "set_geometry",
+        json!({ "node": p.to_wire(), "geometry": { "Path": { "path": square, "corner_radii": [] } } }),
+    );
+    assert!(radii(&doc).is_empty(), "radii given are written");
+}
+
+/// An opacity or alpha outside 0–1 is refused naming it, never folded into a
+/// colour: a fill's `opacity`, a paint's `alpha`, a flat effect's `opacity`.
+/// flip: `unit` taking any number → fails at "a fill's opacity".
+#[test]
+fn an_opacity_outside_zero_to_one_is_refused() {
+    let (mut doc, mut ids, page) = blank();
+    let f = frame_on(&mut doc, &mut ids, page);
+    let n = json!([f.to_wire()]);
+    let fill = why(
+        &doc,
+        &mut ids,
+        "set_fills",
+        json!({ "nodes": n, "fills": [{ "color": "#ff0000", "opacity": 50 }] }),
+    );
+    assert!(
+        fill.contains("`opacity` is from 0 to 1") && fill.contains("0.5"),
+        "a fill's opacity: {fill}"
+    );
+    let negative = why(
+        &doc,
+        &mut ids,
+        "set_fills",
+        json!({ "nodes": n, "fills": [{ "color": "#ff0000", "opacity": -1 }] }),
+    );
+    assert!(negative.contains("opacity"), "{negative}");
+    let alpha = why(
+        &doc,
+        &mut ids,
+        "set_fills",
+        json!({ "nodes": n, "fills": [{ "paint": { "type": "Solid", "color": "#ff0000", "alpha": 50 } }] }),
+    );
+    assert!(alpha.contains("`alpha` is from 0 to 1"), "{alpha}");
+    let shadow = |opacity: Value, color: Value| {
+        json!({ "nodes": n, "effects": [{ "kind": "DropShadow", "color": color, "opacity": opacity,
+                                          "blur": 4, "offset": [0, 2], "spread": 0 }] })
+    };
+    let effect = why(
+        &doc,
+        &mut ids,
+        "set_effects",
+        shadow(json!(50), json!("#000000")),
+    );
+    assert!(effect.contains("`opacity` is from 0 to 1"), "{effect}");
+
+    // A colour in the model's own shape takes the fold too, not only hex.
+    let model = json!({ "components": [0.0, 0.0, 0.0, 1.0], "cs": "srgb" });
+    run(&mut doc, &mut ids, "set_effects", shadow(json!(0.5), model));
+    let effects = serde_json::to_value(doc.get(f).unwrap().effects()).unwrap();
+    let a = effects[0]["kind"]["color"]["components"][3].as_f64();
+    assert_eq!(a, Some(0.5), "the opacity folded: {effects}");
+}
+
+/// A text sizing missing a dimension its type has is refused, not read as 0.
+/// flip: `loosen_sizing` reading an absent dimension as 0 → fails at "Fixed".
+#[test]
+fn a_sizing_without_its_dimension_is_refused() {
+    let (doc, mut ids, page) = blank();
+    let text = |sizing: Value| json!({ "parent": page.to_wire(), "kind": { "Text": { "content": "Hi", "sizing": sizing } } });
+    let fixed = why(
+        &doc,
+        &mut ids,
+        "create_node",
+        text(json!({ "type": "Fixed", "width": 100 })),
+    );
+    assert!(
+        fixed.contains("`Fixed` sizing needs its `height`"),
+        "Fixed: {fixed}"
+    );
+    let auto = why(
+        &doc,
+        &mut ids,
+        "create_node",
+        text(json!({ "type": "AutoHeight" })),
+    );
+    assert!(auto.contains("`width`"), "{auto}");
+    let taken = answer(
+        &doc,
+        &mut ids,
+        "create_node",
+        &text(json!({ "type": "AutoHeight", "width": 80 })),
+    );
+    assert!(taken.is_ok(), "{taken:?}");
+}
+
+/// A field a gradient brush or a grid track has no place for is refused naming
+/// it, as one on a solid fill is: their flattened and untagged shapes hide it
+/// from serde.
+/// flip: `attempt` skipping `unseen_field` → fails at "the gradient's".
+#[test]
+fn a_gradients_and_a_tracks_unknown_field_is_refused() {
+    let (mut doc, mut ids, page) = blank();
+    let f = frame_on(&mut doc, &mut ids, page);
+    let ramp = ondin_core::peniko::Gradient::new_linear((0.0, 0.0), (10.0, 0.0)).with_stops(
+        [
+            ondin_core::peniko::Color::BLACK,
+            ondin_core::peniko::Color::WHITE,
+        ]
+        .as_slice(),
+    );
+    let gradient = serde_json::to_value(ondin_core::Brush::Gradient(ondin_core::GradientBrush {
+        gradient: ramp,
+        transform: Default::default(),
+        opacity: 1.0,
+    }))
+    .unwrap();
+    let ok = json!({ "nodes": [f.to_wire()], "fills": [{ "brush": gradient.clone() }] });
+    assert!(
+        answer(&doc, &mut ids, "set_fills", &ok).is_ok(),
+        "the control"
+    );
+    let mut bad = gradient;
+    bad["Gradient"]["opactiy"] = json!(0.3);
+    let refused = why(
+        &doc,
+        &mut ids,
+        "set_fills",
+        json!({ "nodes": [f.to_wire()], "fills": [{ "brush": bad }] }),
+    );
+    assert!(
+        refused.contains("opactiy") && refused.contains("no such field"),
+        "the gradient's: {refused}"
+    );
+
+    let grid = |track: Value| json!({ "nodes": [f.to_wire()], "display": { "Grid": { "columns": [track], "rows": ["Auto"] } } });
+    let minmax = json!({ "min": { "Px": 100.0 }, "max": { "Fr": 1.0 } });
+    run(&mut doc, &mut ids, "set_display", grid(minmax.clone()));
+    let mut extra = minmax;
+    extra["step"] = json!(2);
+    let refused = why(&doc, &mut ids, "set_display", grid(extra));
+    assert!(refused.contains("step"), "a track's: {refused}");
+}
+
+/// What `get_node` writes reads back: a line height as `"120%"`, an effect's
+/// blend by its label.
+/// flip: `css_length` refusing a `%` → fails at "a percent line height".
+#[test]
+fn a_line_height_in_percent_and_a_blend_label_are_taken() {
+    let (mut doc, mut ids, page) = blank();
+    let f = frame_on(&mut doc, &mut ids, page);
+    let t = run(
+        &mut doc,
+        &mut ids,
+        "create_text",
+        json!({ "parent": f.to_wire(), "text": "Hi" }),
+    )
+    .created[0];
+    run(
+        &mut doc,
+        &mut ids,
+        "set_text_style",
+        json!({ "nodes": [t.to_wire()], "style": { "line_height": "150%" } }),
+    );
+    let NodeKind::Text { style, .. } = doc.get(t).unwrap().kind() else {
+        panic!("a text");
+    };
+    assert_eq!(
+        style.line_height,
+        Some(ondin_core::Length::Em(1.5)),
+        "a percent line height"
+    );
+    run(
+        &mut doc,
+        &mut ids,
+        "set_effects",
+        json!({ "nodes": [f.to_wire()], "effects": [{ "kind": "DropShadow", "color": "#000000",
+                 "blur": 4, "offset": [0, 2], "spread": 0, "blend": "Color burn" }] }),
+    );
+    let effects = serde_json::to_value(doc.get(f).unwrap().effects()).unwrap();
+    assert_eq!(effects[0]["kind"]["blend"], json!("ColorBurn"), "{effects}");
 }
 
 /// A fill given as a colour with an opacity draws that colour at that alpha.

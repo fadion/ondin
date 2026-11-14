@@ -92,8 +92,8 @@ pub(crate) fn listen(
     Ok(Endpoint { file, socket })
 }
 
-/// Every discovery file in the run folder, the window's first. A file whose
-/// endpoint does not answer is a dead process's and is removed.
+/// Every discovery file in the run folder whose endpoint answers, the window's
+/// first. A file whose process is gone is removed.
 pub(crate) fn hosts() -> Vec<Found> {
     let Some(dir) = run_dir() else {
         return Vec::new();
@@ -110,12 +110,17 @@ pub(crate) fn hosts() -> Vec<Found> {
             Some((f, p))
         })
         .collect();
+    // A failed connect is not a dead host: a busy pipe or a window at another
+    // privilege refuses too. Only a file whose process is gone is removed, since
+    // a window writes its file once and would stay unseen until it restarts.
     found.retain(|(f, file)| {
-        let alive = connect(&f.endpoint).is_ok();
-        if !alive {
+        if connect(&f.endpoint).is_ok() {
+            return true;
+        }
+        if !ondin_ai::process_running(f.pid) {
             let _ = std::fs::remove_file(file);
         }
-        alive
+        false
     });
     found.sort_by_key(|(f, _)| (f.host != Host::Window, f.pid));
     found.into_iter().map(|(f, _)| f).collect()

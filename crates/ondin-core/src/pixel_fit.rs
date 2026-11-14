@@ -1,8 +1,9 @@
 //! *Pixel-fit*: put a layer's edges on the pixel grid, so a 16–24px icon renders
 //! crisp at 1×. A command, not a mode: it moves points once and leaves them.
 //!
-//! The grid is world units, or the pixels of one icon size under [`fit_on`]. A corner, and an anchor where the curve turns level or
-//! upright, moves to the nearest grid line on each axis that matters; its handles
+//! The grid is world units, or the pixels of one icon size under [`fit_on`] and
+//! [`fit_copy_on`], which an icon export fits its copy with. A corner, and an
+//! anchor where the curve turns level or upright, moves to the nearest grid line on each axis that matters; its handles
 //! move with it, so a curve keeps its shape. A box shape (a rectangle, an ellipse,
 //! a polygon, a star, a spiral) keeps its kind and has its box rounded instead; a
 //! line or an arc has its two ends fitted. The grid is whole units for every layer,
@@ -11,7 +12,8 @@
 //! moves more than half a unit.
 //!
 //! A layer turned by anything but a quarter turn is skipped, since no move of its
-//! points lines it up with the page's pixels; so are text and a locked layer. All
+//! points lines it up with the page's pixels; so are text and a locked layer,
+//! except in an icon export's copy ([`fit_copy_on`]), which is no one's edit. All
 //! three are counted. A slice draws nothing and is passed over uncounted.
 
 use crate::build;

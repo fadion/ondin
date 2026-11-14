@@ -322,4 +322,29 @@ mod tests {
         );
         assert!(buttons(&ctx, &app).is_empty(), "the switch is off");
     }
+
+    /// A link hovered in a reply outlines its layer on this page, and nothing
+    /// for a layer on another page.
+    /// flip: `draw_assistant_marks` without its page check on the hovered layer →
+    /// fails at "nothing for another page".
+    #[test]
+    fn a_hovered_layer_on_another_page_is_not_outlined_here() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let id = crate::palette::tests::add_rect(&mut app);
+        app.assistant.open = true;
+        app.assistant.hovered = Some(id.to_wire());
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1200.0));
+        let marks = |app: &OndinApp| {
+            let out = ctx.run_ui(egui::RawInput::default(), |ui| {
+                app.draw_assistant_marks(ui.painter(), rect, 1.0);
+            });
+            out.shapes.len()
+        };
+        let here = marks(&app);
+        assert!(here > 0, "outlined on its page");
+        app.add_page();
+        assert_ne!(app.session.doc.page_of(id), Some(app.session.page));
+        assert_eq!(marks(&app), 0, "nothing for another page");
+    }
 }

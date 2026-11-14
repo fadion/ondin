@@ -239,6 +239,9 @@ pub(crate) struct Assistant {
     /// Each harness's program, model and effort as last set in Settings this
     /// session, which come back when it is picked again.
     pub(crate) remembered: std::collections::HashMap<String, (String, String, String)>,
+    /// Proposals a test holds in place of the MCP host a headless window lacks.
+    #[cfg(test)]
+    pub(crate) held: Vec<crate::mcp::propose::Proposal>,
 }
 
 impl Assistant {

@@ -1224,11 +1224,30 @@ fn sweep_on(theme: Theme) {
         check(name, app, found);
     }
     // The assistant's panel: its head's Access dropdown, a question's chip, a
-    // turn's folded calls and its foot, a proposal and a reply's options.
+    // turn's folded calls and its foot, a proposal and a reply's options. The
+    // proposal is held for the front document, which has a path for it to name,
+    // so its card draws *Apply*.
     let mut app = with_a_rect(&ctx);
+    app.session.path = Some(std::env::temp_dir().join("ondin-control-audit.ondin"));
     let found = opened(&ctx, &mut app, |_, a| {
         use crate::assistant::thread::{Chip, Msg, Part, Stats, ToolRow, ToolState};
-        let id = a.session.selection.ids()[0].to_wire();
+        let node = a.session.selection.ids()[0];
+        a.assistant.held.push(crate::mcp::propose::Proposal {
+            id: 1,
+            key: None,
+            document: a.session.path.clone().expect("set above"),
+            title: "Rename the card".into(),
+            changes: vec!["Renamed Card to Hero".into()],
+            calls: vec![(
+                "set_name".into(),
+                serde_json::json!({ "node": node.to_wire(), "name": "Hero" }),
+            )],
+            rev: a.session.revision(),
+            writes: vec![node],
+            before: vec![a.session.doc.get(node).expect("the rect").clone()],
+            client: "Claude".into(),
+        });
+        let id = node.to_wire();
         let chip = Chip {
             id: id.clone(),
             name: "Card".into(),
@@ -1268,6 +1287,10 @@ fn sweep_on(theme: Theme) {
         ];
         a.open_assistant();
     });
+    assert!(
+        found.iter().any(|g| g.label == "Apply"),
+        "the proposal card draws its Apply"
+    );
     check("assistant", app, found);
     // An ICO row's card: the Sizes chips, the held pad and the icon switches.
     let mut app = with_a_rect(&ctx);

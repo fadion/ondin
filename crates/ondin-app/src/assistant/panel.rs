@@ -261,9 +261,7 @@ impl OndinApp {
             Act::Retry(id, name) => {
                 // The layers it writes that are still there go with the question.
                 let writes: Vec<String> = self
-                    .mcp
-                    .as_ref()
-                    .and_then(|h| h.proposal(id))
+                    .held_proposal(id)
                     .map(|p| p.writes.iter().map(|w| w.to_wire()).collect())
                     .unwrap_or_default();
                 let chips = self.selection_chips_of(&writes);
@@ -726,7 +724,7 @@ impl OndinApp {
     /// A proposal's card: what it changes, and *Apply* — or why it no longer
     /// applies, or *Undo* once applied.
     fn proposal_card(&self, ui: &mut egui::Ui, id: u64, acts: &mut Vec<Act>) {
-        let Some(p) = self.mcp.as_ref().and_then(|h| h.proposal(id)) else {
+        let Some(p) = self.held_proposal(id) else {
             ui.label(
                 egui::RichText::new("This proposal is no longer held; ask again to see it.")
                     .size(ui::SMALL_PT)
@@ -886,12 +884,30 @@ impl OndinApp {
             });
     }
 
+    /// The proposal called `id`, while the window's MCP host keeps it.
+    fn held_proposal(&self, id: u64) -> Option<&crate::mcp::propose::Proposal> {
+        #[cfg(test)]
+        if let Some(p) = self.assistant.held.iter().find(|p| p.id == id) {
+            return Some(p);
+        }
+        self.mcp.as_ref().and_then(|h| h.proposal(id))
+    }
+
     /// Apply a proposal from its card, as one undo step marked as the
     /// assistant's.
     fn assistant_apply(&mut self, id: u64) {
-        let Some(p) = self.mcp.as_ref().and_then(|h| h.proposal(id)).cloned() else {
+        let Some(p) = self.held_proposal(id).cloned() else {
             return;
         };
+        // The person's open text edit is theirs and comes first, as its own
+        // step; a proposal it changed the layers of no longer applies.
+        self.finish_text_first();
+        if let Some(name) = crate::mcp::propose::stale(&self.session, &p) {
+            self.session.info(format!(
+                "{name} changed after this was proposed. Nothing was changed."
+            ));
+            return;
+        }
         match crate::mcp::propose::apply(&mut self.session, &p) {
             Ok(a) => {
                 self.assistant.applied.insert(id, a);
@@ -905,6 +921,8 @@ impl OndinApp {
         let Some(a) = self.assistant.applied.get(&id).copied() else {
             return;
         };
+        // A text edit still open would land after the proposal's step.
+        self.finish_text_first();
         if crate::mcp::propose::is_last(&self.session, &a) {
             self.undo();
             self.assistant.applied.remove(&id);
@@ -1157,5 +1175,86 @@ mod tests {
         assert_eq!(recall_step(Some(1), true, 2), Some(0));
         assert_eq!(recall_step(Some(0), false, 2), Some(1));
         assert_eq!(recall_step(None, true, 0), None);
+    }
+
+    /// *Apply* ends the person's open text edit first, as its own step, and a
+    /// proposal that edit made stale is then refused rather than applied over it.
+    /// flip: `assistant_apply` without its `finish_text_first` → fails at "the
+    /// edit ended".
+    #[test]
+    fn apply_keeps_the_persons_typing() {
+        use ondin_mcp::queue::Call;
+        use serde_json::{Value, json};
+        let dir = std::env::temp_dir().join(format!(
+            "ondin-assistant-apply-{}",
+            crate::session::random_actor()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("card.ondin");
+        let mut ids = ondin_core::IdSource::new(crate::session::random_actor());
+        let doc = ondin_core::Document::new(ids.mint());
+        let page = doc.first_page().to_wire();
+        std::fs::write(&file, ondin_core::io::save(&doc).unwrap()).unwrap();
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut engine = crate::mcp::Engine::default();
+        let mut call = |app: &mut OndinApp, tool: &str, args: Value| {
+            let (reply, _answer) = std::sync::mpsc::sync_channel(1);
+            let out = engine.handle(app, Call::new(1, None, tool, args, reply));
+            assert!(!out.is_error, "{tool}: {:?}", out.content);
+            out.structured.unwrap()
+        };
+        let document = json!({ "document": file.display().to_string() });
+        call(&mut app, "use_document", document);
+        app.activate_tab(app.tab_of_path(&file).unwrap());
+        let made = call(
+            &mut app,
+            "create_text",
+            json!({ "parent": page, "text": "Hello" }),
+        );
+        let id = ondin_core::NodeId::from_wire(made["created"][0].as_str().unwrap()).unwrap();
+        let proposed = call(
+            &mut app,
+            "propose_edit",
+            json!({
+                "title": "Remove the greeting",
+                "calls": [{ "verb": "delete_node", "args": { "nodes": [id.to_wire()] } }],
+            }),
+        );
+        let pid = proposed["proposal"].as_u64().unwrap();
+        app.assistant
+            .held
+            .push(engine.proposal(pid).expect("held").clone());
+        let node = app.session.doc.get(id).unwrap();
+        let parts = ondin_core::TextParts::of(node.kind()).unwrap();
+        let original = (
+            "Hello".to_owned(),
+            parts.spans.clone(),
+            parts.para_spans.clone(),
+        );
+        app.text = Some(crate::preview::TextSession {
+            id,
+            editor: ondin_core::TextEdit::new("Hello there", parts),
+            original,
+            created: false,
+            blink: Default::default(),
+        });
+        app.mode = crate::input::Mode::TextInsert;
+        assert!(
+            crate::mcp::propose::stale(&app.session, &app.assistant.held[0]).is_none(),
+            "the card offers Apply"
+        );
+        app.assistant_apply(pid);
+        assert!(app.text.is_none(), "the edit ended");
+        assert!(
+            !app.assistant.applied.contains_key(&pid),
+            "refused as stale"
+        );
+        let ondin_core::NodeKind::Text { content, .. } = app.session.doc.get(id).unwrap().kind()
+        else {
+            panic!("not a text");
+        };
+        assert_eq!(content.as_str(), "Hello there", "typing kept");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

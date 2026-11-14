@@ -11518,7 +11518,10 @@ impl OndinApp {
             Axis::Y => at.y,
         };
         let (tx, text) = ondin_core::centroid::align(doc, res, &ids, at, axis);
-        let moved = ids.len();
+        // The layers the step moves: not the key, nor one already in place.
+        let subjects = tx.subjects();
+        let moved = ids.iter().filter(|id| subjects.contains(id)).count();
+        let text = text.min(moved);
         self.session
             .name_step("Align visual centres", icon::VISUAL_CENTRE);
         if tx.0.is_empty() || !self.commit_edit(tx) {
@@ -17230,6 +17233,11 @@ mod align_card_tests {
         app.session.selection.set_key(square);
         app.align_visual = true;
         assert_eq!(app.visual_centre_marks(), vec![centroid_of(&app, play)]);
+        // Another key, with the document and selection unchanged, marks again.
+        // flip: `visual_centre_marks` keyed without the key → fails here.
+        app.session.selection.set_key(play);
+        assert_eq!(app.visual_centre_marks(), vec![centroid_of(&app, square)]);
+        app.session.selection.set_key(square);
 
         app.align(Axis::Y, Edge::Mid);
         let (p, s) = (centroid_of(&app, play), centroid_of(&app, square));

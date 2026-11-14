@@ -1223,9 +1223,9 @@ pub struct OndinApp {
     /// from yesterday is one nobody remembers when things stop aligning as expected.
     pub(crate) align_visual: bool,
     /// The visual centres the canvas marks while [`Self::align_visual`] is on, with
-    /// the document revision and selection they were weighed for: weighing unions
-    /// every layer's ink, too slow to redo each frame.
-    pub(crate) visual_marks: Option<(u64, Vec<NodeId>, Vec<Point>)>,
+    /// the document revision, selection and key layer they were weighed for:
+    /// weighing unions every layer's ink, too slow to redo each frame.
+    pub(crate) visual_marks: Option<(u64, Vec<NodeId>, Option<NodeId>, Vec<Point>)>,
     /// The four *Snap* menu toggles, read only by [`OndinApp::snapping`].
     pub(crate) snap_shapes: bool,
     pub(crate) snap_guides: bool,

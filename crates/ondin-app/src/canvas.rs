@@ -981,6 +981,11 @@ impl Gpu {
 /// the layer's own opacity.
 const GHOST_ALPHA: f32 = 0.3;
 
+/// The most layers the canvas marks visual centres for: weighing unions every
+/// layer's ink on the UI thread (about 94 ms for 1,000 circles in release), and
+/// past this many the diamonds are a field nobody reads.
+pub(crate) const VISUAL_MARKS_MAX: usize = 100;
+
 /// A component set's tab's padding round its text.
 const SET_TAB_PAD: egui::Vec2 = egui::vec2(6.0, 3.0);
 
@@ -8233,26 +8238,32 @@ impl OndinApp {
 
     /// The visual centres of the layers the Align card's centre buttons would move
     /// by weight: the outermost selected, less the key layer, whose centre is the
-    /// target. Weighed again only when the document or the selection changes.
+    /// target. Weighed again only when the document, the selection or its key
+    /// changes, and not at all past [`VISUAL_MARKS_MAX`] layers.
     pub(crate) fn visual_centre_marks(&mut self) -> Vec<Point> {
         let rev = self.session.revision();
         let ids = self.session.selection.ids().to_vec();
-        if let Some((r, held, marks)) = &self.visual_marks
+        let key = self.session.selection.key();
+        if let Some((r, held, k, marks)) = &self.visual_marks
             && *r == rev
             && *held == ids
+            && *k == key
         {
             return marks.clone();
         }
         let (doc, res) = (&self.session.doc, &self.session.resolved);
         let members = ondin_core::build::outermost(doc, &ids);
-        let key = self.session.selection.key().filter(|_| members.len() > 1);
-        let marks: Vec<Point> = members
-            .iter()
-            .filter(|id| Some(**id) != key)
-            .filter_map(|id| ondin_core::centroid::visual_centre(doc, res, *id))
-            .map(|c| c.at())
-            .collect();
-        self.visual_marks = Some((rev, ids, marks.clone()));
+        let target = key.filter(|_| members.len() > 1);
+        let marks: Vec<Point> = match members.len() > VISUAL_MARKS_MAX {
+            true => Vec::new(),
+            false => members
+                .iter()
+                .filter(|id| Some(**id) != target)
+                .filter_map(|id| ondin_core::centroid::visual_centre(doc, res, *id))
+                .map(|c| c.at())
+                .collect(),
+        };
+        self.visual_marks = Some((rev, ids, key, marks.clone()));
         marks
     }
 

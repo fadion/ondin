@@ -552,13 +552,14 @@ impl StreamParser {
         let info = s.get("tool_info").unwrap_or(&serde_json::Value::Null);
         let params = info.get("parameters").unwrap_or(&serde_json::Value::Null);
         let raw = str_at(s, "tool_name");
+        // A session registers Ondin under a name of its own; it reads as Ondin's.
+        let server = match str_at(params, "ServerName") {
+            s if crate::harness::is_antigravity_session_server(s) => crate::MCP_SERVER,
+            s => s,
+        };
         let (name, input) = match raw {
             "call_mcp_tool" => (
-                format!(
-                    "mcp__{}__{}",
-                    str_at(params, "ServerName"),
-                    str_at(params, "ToolName")
-                ),
+                format!("mcp__{server}__{}", str_at(params, "ToolName")),
                 params.get("Arguments").cloned().unwrap_or_default(),
             ),
             _ => (raw.to_string(), params.clone()),
@@ -1353,6 +1354,21 @@ mod tests {
             ],
         );
         assert_eq!(text_of(&evs), "Hi");
+    }
+
+    /// An Antigravity call to the session's own registration reads as Ondin's;
+    /// one to the person's own server keeps its name.
+    #[test]
+    fn an_antigravity_session_server_reads_as_ondins() {
+        let call = |server: &str| {
+            format!(
+                r#"{{"event":"step_update","step_update":{{"step_index":4,"state":"ACTIVE","step_type":"tool","tool_name":"call_mcp_tool","tool_info":{{"name":"call_mcp_tool","parameters":{{"Arguments":{{}},"ServerName":"{server}","ToolName":"get_node"}}}}}}}}"#
+            )
+        };
+        let evs = drive(Harness::Antigravity, &[&call("ondin0123abcd")]);
+        assert_eq!(calls(&evs)[0].1, "mcp__ondin__get_node");
+        let evs = drive(Harness::Antigravity, &[&call("fs")]);
+        assert_eq!(calls(&evs)[0].1, "mcp__fs__get_node");
     }
 
     /// Claude's input tokens include cached input, as the other dialects' do.

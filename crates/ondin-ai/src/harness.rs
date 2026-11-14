@@ -1279,21 +1279,36 @@ pub(crate) fn dsh_dump_is_headless(dump: &str) -> bool {
     })
 }
 
-/// The `permissions.allow` rules Antigravity needs to run Ondin's tools, one
-/// per granted tool. Headless it cannot ask, so a tool with no rule is denied
-/// and the turn still reports success with an empty answer.
-pub(crate) fn antigravity_allow_rules(allowed: &[String]) -> Vec<String> {
+/// The name one Antigravity session registers Ondin's server under: `ondin`
+/// and eight hex digits, never the person's own `ondin`, so a session never
+/// replaces or removes a registration it did not make.
+pub(crate) fn antigravity_server_name(tag: &str) -> String {
+    format!("{MCP_SERVER}{}", &tag[..tag.len().min(8)])
+}
+
+/// Is `name` a session's own registration, as [`antigravity_server_name`] makes it?
+pub(crate) fn is_antigravity_session_server(name: &str) -> bool {
+    name.strip_prefix(MCP_SERVER).is_some_and(|t| {
+        t.len() == 8
+            && t.bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    })
+}
+
+/// The `permissions.allow` rules Antigravity needs to run Ondin's tools under
+/// `server`, one per granted tool. Headless it cannot ask, so a tool with no
+/// rule is denied and the turn still reports success with an empty answer.
+pub(crate) fn antigravity_allow_rules(server: &str, allowed: &[String]) -> Vec<String> {
     allowed
         .iter()
-        .map(|t| format!("mcp({MCP_SERVER}/{t})"))
+        .map(|t| format!("mcp({server}/{t})"))
         .collect()
 }
 
-/// Is `rule` one Ondin grants? Every `mcp(ondin/…)` rule is, whatever level
-/// granted it; one the person wrote by hand for an Ondin tool is
-/// indistinguishable and goes too, which is better than a grant nobody remembers.
-fn is_ondin_rule(rule: &str) -> bool {
-    rule.starts_with(&format!("mcp({MCP_SERVER}/"))
+/// Is `rule` one this session's registration grants? Only rules naming its own
+/// server are: the person's `mcp(ondin/…)` rules are theirs.
+fn is_ondin_rule(rule: &str, server: &str) -> bool {
+    rule.starts_with(&format!("mcp({server}/"))
 }
 
 /// What a settings surgery asks its caller to do. `Unchanged` writes nothing:
@@ -1305,11 +1320,12 @@ pub(crate) enum SettingsEdit {
     Write(String),
 }
 
-/// Make Antigravity's `settings.json` grant exactly `rules` of Ondin's, every
+/// Make Antigravity's `settings.json` grant exactly `rules` for `server`, every
 /// other rule and key kept. `None` when the file is not a JSON object: losing
 /// the person's file is worse than a session without tools.
 pub(crate) fn antigravity_settings_with_only(
     current: &str,
+    server: &str,
     rules: &[String],
 ) -> Option<SettingsEdit> {
     let mut doc = parse_settings(current)?;
@@ -1326,7 +1342,7 @@ pub(crate) fn antigravity_settings_with_only(
         let before = arr.len();
         arr.retain(|v| {
             !v.as_str()
-                .is_some_and(|s| is_ondin_rule(s) && !rules.iter().any(|r| r == s))
+                .is_some_and(|s| is_ondin_rule(s, server) && !rules.iter().any(|r| r == s))
         });
         changed |= arr.len() != before;
         for r in rules {
@@ -1343,16 +1359,16 @@ pub(crate) fn antigravity_settings_with_only(
     Some(SettingsEdit::Write(render_settings(doc)?))
 }
 
-/// Withdraw every Ondin rule from Antigravity's `settings.json`. Only the
+/// Withdraw every rule for `server` from Antigravity's `settings.json`. Only the
 /// containers this call emptied are pruned; an `allow: []` the person had stays.
-pub(crate) fn antigravity_settings_without(current: &str) -> Option<SettingsEdit> {
+pub(crate) fn antigravity_settings_without(current: &str, server: &str) -> Option<SettingsEdit> {
     let mut doc = parse_settings(current)?;
     let mut removed = false;
     if let Some(perms) = doc.get_mut("permissions").and_then(|p| p.as_object_mut()) {
         let mut emptied = false;
         if let Some(arr) = perms.get_mut("allow").and_then(|a| a.as_array_mut()) {
             let before = arr.len();
-            arr.retain(|v| !v.as_str().is_some_and(is_ondin_rule));
+            arr.retain(|v| !v.as_str().is_some_and(|s| is_ondin_rule(s, server)));
             removed = arr.len() != before;
             emptied = removed && arr.is_empty();
         }
@@ -1720,48 +1736,78 @@ mod tests {
         assert!(!dsh_dump_is_headless(""));
     }
 
-    /// Granting replaces Ondin's previous rules with exactly this level's and
-    /// keeps the person's; granting the same again writes nothing.
+    /// Granting replaces this session's previous rules with exactly this
+    /// level's and keeps everyone else's, the person's `mcp(ondin/…)` included;
+    /// granting the same again writes nothing.
+    /// flip: `is_ondin_rule` matching any `mcp(ondin` prefix → fails at the allow list.
     #[test]
     fn antigravity_rules_describe_the_level() {
-        let cur = r#"{"permissions":{"allow":["mcp(ondin/set_fills)","mcp(mine/x)"]},"trustedWorkspaces":["a"]}"#;
-        let rules = antigravity_allow_rules(&["get_node".into()]);
-        let SettingsEdit::Write(next) = antigravity_settings_with_only(cur, &rules).unwrap() else {
+        let me = antigravity_server_name("0123abcd");
+        assert_eq!(me, "ondin0123abcd");
+        let cur = r#"{"permissions":{"allow":["mcp(ondin0123abcd/set_fills)","mcp(ondin/set_fills)","mcp(mine/x)"]},"trustedWorkspaces":["a"]}"#;
+        let rules = antigravity_allow_rules(&me, &["get_node".into()]);
+        let SettingsEdit::Write(next) = antigravity_settings_with_only(cur, &me, &rules).unwrap()
+        else {
             panic!("should write");
         };
         let v: serde_json::Value = serde_json::from_str(&next).unwrap();
         assert_eq!(
             v.pointer("/permissions/allow").unwrap(),
-            &serde_json::json!(["mcp(mine/x)", "mcp(ondin/get_node)"])
+            &serde_json::json!([
+                "mcp(ondin/set_fills)",
+                "mcp(mine/x)",
+                "mcp(ondin0123abcd/get_node)"
+            ])
         );
         assert_eq!(v["trustedWorkspaces"], serde_json::json!(["a"]));
         assert_eq!(
-            antigravity_settings_with_only(&next, &rules),
+            antigravity_settings_with_only(&next, &me, &rules),
             Some(SettingsEdit::Unchanged)
         );
-        assert_eq!(antigravity_settings_with_only("[1]", &rules), None);
+        assert_eq!(antigravity_settings_with_only("[1]", &me, &rules), None);
     }
 
     /// Withdrawing prunes only what it emptied, and writes nothing when there
-    /// was nothing of Ondin's.
+    /// was nothing of this session's.
     #[test]
     fn antigravity_withdraw_prunes_only_what_it_emptied() {
-        let SettingsEdit::Write(next) =
-            antigravity_settings_without(r#"{"permissions":{"allow":["mcp(ondin/get_node)"]}}"#)
-                .unwrap()
-        else {
+        let me = "ondin0123abcd";
+        let SettingsEdit::Write(next) = antigravity_settings_without(
+            r#"{"permissions":{"allow":["mcp(ondin0123abcd/get_node)"]}}"#,
+            me,
+        )
+        .unwrap() else {
             panic!("should write");
         };
         assert_eq!(next.trim(), "{}");
-        let theirs = r#"{"permissions":{"allow":[]}}"#;
-        assert_eq!(
-            antigravity_settings_without(theirs),
-            Some(SettingsEdit::Unchanged)
-        );
-        assert_eq!(
-            antigravity_settings_without(""),
-            Some(SettingsEdit::Unchanged)
-        );
+        for theirs in [
+            r#"{"permissions":{"allow":[]}}"#,
+            r#"{"permissions":{"allow":["mcp(ondin/get_node)"]}}"#,
+            "",
+        ] {
+            assert_eq!(
+                antigravity_settings_without(theirs, me),
+                Some(SettingsEdit::Unchanged)
+            );
+        }
+    }
+
+    /// A session's server name is recognised; the person's `ondin` and other
+    /// names are not.
+    #[test]
+    fn a_session_server_name_is_ours_alone() {
+        assert!(is_antigravity_session_server(&antigravity_server_name(
+            "deadbeef00"
+        )));
+        for theirs in [
+            "ondin",
+            "ondinDEADBEEF",
+            "ondin-deadbeef",
+            "ondindeadbee",
+            "fs",
+        ] {
+            assert!(!is_antigravity_session_server(theirs), "{theirs}");
+        }
     }
 
     /// Every sentence names a harness, says where foreign servers reach the

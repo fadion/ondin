@@ -738,6 +738,7 @@ impl Inner {
             Prep::None => Ok(()),
             Prep::Antigravity => crate::antigravity::Registration::install(
                 launch(self.harness, &self.program),
+                &self.program,
                 &self.run_root,
                 &self.mcp_exe,
                 &self.mcp_args,

@@ -356,6 +356,10 @@ pub enum PrefColour {
     Guide,
     /// The pixel grid's ink while *Adaptive pixel grid* is off, alpha and all.
     Grid,
+    /// The fill a frame drawn with the frame tool starts with.
+    FrameFill,
+    /// The fill a drawn rectangle, ellipse, polygon or star starts with.
+    ShapeFill,
 }
 
 /// Which of a text node's two decorations a [`PaintSlot::TextDecoration`] names.

@@ -7413,9 +7413,11 @@ impl OndinApp {
     }
 
     /// The attributes a new text layer starts with, in the default font
-    /// (`FontService::new_text_parts`).
+    /// (`FontService::new_text_parts`) and at the default size.
     pub(crate) fn new_text_parts(&self) -> ondin_core::text::TextParts {
-        self.fonts.new_text_parts(&self.prefs.default_font)
+        let mut parts = self.fonts.new_text_parts(&self.prefs.default_font);
+        parts.style.font_size = self.prefs.default_text_size();
+        parts
     }
 
     /// Every family the document's text nodes name, lowercased, for

@@ -158,6 +158,7 @@ pub(crate) struct Settings {
     collapse_groups_on_open: bool,
     resource_meter: bool,
     default_font: String,
+    default_text_size: f64,
     spell_check: bool,
     web_fonts: bool,
     icon_sets: Vec<String>,
@@ -186,6 +187,7 @@ impl Settings {
             collapse_groups_on_open: prefs.collapse_groups_on_open,
             resource_meter: prefs.resource_meter,
             default_font: prefs.default_font.clone(),
+            default_text_size: prefs.default_text_size(),
             spell_check: prefs.spell_check,
             web_fonts: prefs.web_fonts,
             icon_sets: prefs.assets.icon_sets.clone(),
@@ -204,6 +206,7 @@ impl Settings {
             guide_thickness: self.canvas.guide_thickness,
             snap_px: self.canvas.snap_px,
             paste_offset: self.canvas.paste_offset,
+            default_text_size: self.default_text_size,
         }
     }
 
@@ -214,6 +217,7 @@ impl Settings {
         self.canvas.guide_thickness = s.guide_thickness;
         self.canvas.snap_px = s.snap_px;
         self.canvas.paste_offset = s.paste_offset;
+        self.default_text_size = s.default_text_size;
     }
 
     /// The theme picked in the form, which the chrome previews while the modal
@@ -234,6 +238,7 @@ impl Settings {
             collapse_groups_on_open,
             resource_meter,
             default_font,
+            default_text_size,
             spell_check,
             web_fonts,
             icon_sets,
@@ -251,6 +256,7 @@ impl Settings {
             *library != saved.library,
             *nudge != saved.nudge || *canvas != saved.canvas,
             *default_font != saved.default_font
+                || *default_text_size != saved.default_text_size
                 || *spell_check != saved.spell_check
                 || *web_fonts != saved.web_fonts,
             *icon_sets != saved.icon_sets
@@ -273,6 +279,7 @@ impl Settings {
         prefs.collapse_groups_on_open = self.collapse_groups_on_open;
         prefs.resource_meter = self.resource_meter;
         prefs.default_font.clone_from(&self.default_font);
+        prefs.default_text_size = self.default_text_size;
         prefs.spell_check = self.spell_check;
         prefs.web_fonts = self.web_fonts;
         prefs.assets.icon_sets.clone_from(&self.icon_sets);
@@ -293,6 +300,7 @@ pub(crate) struct Scrubbed {
     guide_thickness: u8,
     snap_px: u8,
     paste_offset: u16,
+    default_text_size: f64,
 }
 
 /// The settings button's box and glyph on both screens — the editor's
@@ -469,6 +477,8 @@ impl OndinApp {
         if let Some(live) = &self.settings {
             draft.canvas.guide_colour = live.canvas.guide_colour;
             draft.canvas.grid_ink = live.canvas.grid_ink;
+            draft.canvas.frame_fill = live.canvas.frame_fill;
+            draft.canvas.shape_fill = live.canvas.shape_fill;
         }
         // The backdrop and Escape both mean Cancel. Read after the body, because
         // `should_close` consumes the Escape press.
@@ -600,6 +610,19 @@ impl OndinApp {
                 let snapping = snap_row(ui, &mut draft.canvas);
                 section(ui, "Paste");
                 let pasting = paste_row(ui, &mut draft.canvas);
+                section(ui, "New layers");
+                let defaults = CanvasPrefs::default();
+                self.pref_colour_row(
+                    ui,
+                    PrefColour::FrameFill,
+                    draft.canvas.frame_fill != defaults.frame_fill,
+                );
+                ui.add_space(ROW_GAP);
+                self.pref_colour_row(
+                    ui,
+                    PrefColour::ShapeFill,
+                    draft.canvas.shape_fill != defaults.shape_fill,
+                );
                 section(ui, "Guides and grid");
                 let guides = self.guide_rows(ui, &mut draft.canvas);
                 nudging || snapping || pasting || guides
@@ -610,6 +633,15 @@ impl OndinApp {
                 if let Some(family) = self.default_font_row(ui, &draft.default_font) {
                     draft.default_font = family;
                 }
+                ui.add_space(ROW_GAP);
+                let sizing = whole_row(
+                    ui,
+                    "Default size",
+                    "px",
+                    "The size new text layers start at",
+                    &mut draft.default_text_size,
+                    (Prefs::TEXT_SIZE_MIN, Prefs::TEXT_SIZE_MAX),
+                );
                 ui.add_space(ROW_GAP);
                 if ui::switch_row(ui, "Check spelling", draft.spell_check, SWITCH_H)
                     .on_hover_text(
@@ -625,7 +657,7 @@ impl OndinApp {
                 }
                 ui.add_space(ROW_GAP);
                 self.font_cache_row(ui);
-                false
+                sizing
             }
             SettingsTab::Assets => {
                 self.asset_rows(ui, draft);
@@ -698,6 +730,16 @@ impl OndinApp {
                     "Already the default pixel grid colour",
                 ),
             ),
+            PrefColour::FrameFill => (
+                "Frame fill",
+                "Edit the fill new frames start with",
+                ("Reset the frame fill", "Already the default frame fill"),
+            ),
+            PrefColour::ShapeFill => (
+                "Shape fill",
+                "Edit the fill new shapes start with",
+                ("Reset the shape fill", "Already the default shape fill"),
+            ),
         };
         let Some(colour) = self.pref_colour(which) else {
             return;
@@ -716,10 +758,7 @@ impl OndinApp {
             .clicked()
                 && resettable
             {
-                let to = match which {
-                    PrefColour::Guide => CanvasPrefs::default().guide_colour,
-                    PrefColour::Grid => CanvasPrefs::default().grid_ink,
-                };
+                let to = *pref_colour_of(&mut CanvasPrefs::default(), which);
                 self.write_pref_colour(which, &ondin_core::Brush::Solid(to));
             }
             let size = egui::vec2(PREF_CONTROL_W - reset_w - COL_GAP, FIELD_H);
@@ -732,11 +771,8 @@ impl OndinApp {
 
     /// The Settings draft's colour for `which`, or `None` while the modal is shut.
     pub(crate) fn pref_colour(&self, which: PrefColour) -> Option<ondin_core::peniko::Color> {
-        let canvas = &self.settings.as_ref()?.canvas;
-        Some(match which {
-            PrefColour::Guide => canvas.guide_colour,
-            PrefColour::Grid => canvas.grid_ink,
-        })
+        let mut canvas = self.settings.as_ref()?.canvas;
+        Some(*pref_colour_of(&mut canvas, which))
     }
 
     /// Put `brush`'s colour in the Settings draft — every slot verb's route for a
@@ -752,10 +788,11 @@ impl OndinApp {
         let Some(settings) = self.settings.as_mut() else {
             return false;
         };
-        match which {
-            PrefColour::Guide => settings.canvas.guide_colour = colour.with_alpha(1.0),
-            PrefColour::Grid => settings.canvas.grid_ink = colour,
-        }
+        let colour = match which {
+            PrefColour::Guide => colour.with_alpha(1.0),
+            _ => colour,
+        };
+        *pref_colour_of(&mut settings.canvas, which) = colour;
         true
     }
 
@@ -1089,6 +1126,17 @@ fn wheel_rows(ui: &mut egui::Ui, canvas: &mut CanvasPrefs) {
     );
 }
 
+/// The field of `canvas` a [`PrefColour`] names: the one map from a Settings colour
+/// slot to its preference, for reading, writing and resetting alike.
+fn pref_colour_of(canvas: &mut CanvasPrefs, which: PrefColour) -> &mut ondin_core::peniko::Color {
+    match which {
+        PrefColour::Guide => &mut canvas.guide_colour,
+        PrefColour::Grid => &mut canvas.grid_ink,
+        PrefColour::FrameFill => &mut canvas.frame_fill,
+        PrefColour::ShapeFill => &mut canvas.shape_fill,
+    }
+}
+
 /// A labelled whole number in the value column, `unit` after it: the guide
 /// thickness, the snap distance, the paste offset. Rounded and held to `lo..=hi`
 /// here as well as by the scrub, which settles a drag and leaves typing alone.
@@ -1134,16 +1182,11 @@ fn snap_row(ui: &mut egui::Ui, canvas: &mut CanvasPrefs) -> bool {
         ui,
         "Snap distance",
         "px",
-        "How near an edge comes before it snaps, on screen",
+        "How near, on screen, an edge comes before it snaps, at any zoom",
         &mut px,
         range,
     );
     canvas.snap_px = px as u8;
-    caption(
-        ui,
-        "Measured on screen, so snapping is as sticky at every zoom. The Snap menu \
-         picks what it snaps to.",
-    );
     dragging
 }
 
@@ -1155,18 +1198,14 @@ fn paste_row(ui: &mut egui::Ui, canvas: &mut CanvasPrefs) -> bool {
         ui,
         "Paste offset",
         "px",
-        "How far right and down a pasted copy lands from its original",
+        &crate::input::keys(
+            "How far right and down Ctrl+V lands a copy from its original; 0 pastes on \
+             top. Ctrl+Shift+V always pastes in place",
+        ),
         &mut px,
         (0.0, f64::from(CanvasPrefs::PASTE_MAX)),
     );
     canvas.paste_offset = px as u16;
-    caption(
-        ui,
-        &crate::input::keys(
-            "Ctrl+V places a copy this far from its original; 0 pastes on top of it. \
-             Ctrl+Shift+V always pastes in place.",
-        ),
-    );
     dragging
 }
 
@@ -2223,9 +2262,11 @@ mod tests {
     fn a_row_and_the_button_beside_it_share_one_centre() {
         let ctx = egui::Context::default();
         let mut app = OndinApp::headless(&ctx);
-        app.toggle_settings(&ctx, Some(SettingsTab::Text));
+        // Canvas first: the first "px" is then the nudge field's, which sits above
+        // the snap and paste rows' and the Text tab's size field.
+        app.toggle_settings(&ctx, Some(SettingsTab::Canvas));
         let mut runs = galleys(&mut app, &ctx);
-        app.settings_tab = SettingsTab::Canvas;
+        app.settings_tab = SettingsTab::Text;
         runs.extend(galleys(&mut app, &ctx));
         let mid = |label: &str| {
             runs.iter()
@@ -2324,7 +2365,14 @@ mod tests {
             (SettingsTab::Library, &["STORAGE", "LIBRARY", "LAUNCH"]),
             (
                 SettingsTab::Canvas,
-                &["WHEEL", "NUDGE", "SNAPPING", "PASTE", "GUIDES AND GRID"],
+                &[
+                    "WHEEL",
+                    "NUDGE",
+                    "SNAPPING",
+                    "PASTE",
+                    "NEW LAYERS",
+                    "GUIDES AND GRID",
+                ],
             ),
             (SettingsTab::Text, &["WEB FONTS"]),
         ] {
@@ -2520,6 +2568,7 @@ mod tests {
                 collapse_groups_on_open: false,
                 resource_meter: false,
                 default_font: "Inter".into(),
+                default_text_size: 24.0,
                 spell_check: true,
                 web_fonts: true,
                 icon_sets: Vec::new(),
@@ -2546,11 +2595,14 @@ mod tests {
                 grid_ink: ondin_core::peniko::Color::from_rgba8(40, 120, 220, 90),
                 snap_px: 10,
                 paste_offset: 0,
+                frame_fill: ondin_core::peniko::Color::from_rgb8(250, 248, 240),
+                shape_fill: ondin_core::peniko::Color::from_rgba8(120, 130, 140, 128),
             },
             tree_guides: false,
             collapse_groups_on_open: true,
             resource_meter: true,
             default_font: "Roboto".into(),
+            default_text_size: 18.0,
             spell_check: false,
             web_fonts: false,
             icon_sets: vec!["lucide".into()],

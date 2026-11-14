@@ -388,6 +388,10 @@ pub struct CanvasPrefs {
     /// How far right and down `Ctrl+V` places a copy from its original, in its
     /// parent's units; 0 pastes on top of it. Read through [`Self::paste_offset`].
     pub paste_offset: u16,
+    /// The fill a frame drawn with the frame tool starts with.
+    pub frame_fill: Color,
+    /// The fill a drawn rectangle, ellipse, polygon or star starts with.
+    pub shape_fill: Color,
 }
 
 impl CanvasPrefs {
@@ -403,6 +407,10 @@ impl CanvasPrefs {
     pub fn snap_px(&self) -> u8 {
         self.snap_px.clamp(Self::SNAP_MIN, Self::SNAP_MAX)
     }
+
+    /// A new shape's fill until Settings says otherwise: a light neutral grey that
+    /// reads as a placeholder on a white frame and on the dark canvas.
+    pub const SHAPE_FILL: Color = Color::from_rgba8(217, 217, 217, 255);
 
     /// The paste offset a fresh install starts with, and the most the field takes.
     pub const PASTE_DEFAULT: u16 = 20;
@@ -432,6 +440,8 @@ impl Default for CanvasPrefs {
             grid_ink: Self::GRID_INK,
             snap_px: crate::snap::TOLERANCE_PX as u8,
             paste_offset: Self::PASTE_DEFAULT,
+            frame_fill: Color::WHITE,
+            shape_fill: Self::SHAPE_FILL,
         }
     }
 }
@@ -500,6 +510,9 @@ pub struct Prefs {
     /// downloadable degrades to Inter at creation, and the preference stays, for a
     /// font that comes back.
     pub default_font: String,
+    /// The size, in px, a new text layer starts at (`OndinApp::new_text_parts`);
+    /// read through [`Prefs::default_text_size`].
+    pub default_text_size: f64,
     /// Underline misspelled words while editing text, and offer corrections in
     /// the text menu (`crate::spell`). On; the checker is the OS's and offline.
     pub spell_check: bool,
@@ -678,6 +691,7 @@ impl Default for Prefs {
             resource_meter: false,
             web_fonts: true,
             default_font: "Inter".into(),
+            default_text_size: Self::TEXT_SIZE_DEFAULT,
             spell_check: true,
             // An `f32`'s own default of 0.0 would clamp the panel to `MIN_W` on
             // every upgraded install.
@@ -727,6 +741,22 @@ impl Default for Prefs {
 }
 
 impl Prefs {
+    /// The size new text starts at on a fresh install, and the range the Settings
+    /// field offers.
+    pub const TEXT_SIZE_DEFAULT: f64 = 24.0;
+    pub const TEXT_SIZE_MIN: f64 = 4.0;
+    pub const TEXT_SIZE_MAX: f64 = 400.0;
+
+    /// [`Self::default_text_size`] held to its range, whatever the file says.
+    pub fn default_text_size(&self) -> f64 {
+        if self.default_text_size.is_finite() {
+            self.default_text_size
+                .clamp(Self::TEXT_SIZE_MIN, Self::TEXT_SIZE_MAX)
+        } else {
+            Self::TEXT_SIZE_DEFAULT
+        }
+    }
+
     /// Read them, or `Default` if there is nothing readable there — recording
     /// which of "nothing" and "not readable" it was, in [`Self::unreadable`].
     pub fn load() -> Self {

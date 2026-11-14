@@ -1459,11 +1459,6 @@ fn autopan_delta(p: egui::Pos2, rect: egui::Rect, dt: f32, ppp: f32) -> Option<V
     ))
 }
 
-/// Default fill for drawn rectangles/ellipses (Figma's neutral #D9D9D9).
-fn default_shape_fill() -> Color {
-    Color::from_rgba8(217, 217, 217, 255)
-}
-
 /// Pixel preview's view of `camera` on a canvas `px` device pixels big: a camera
 /// drawing one world unit to a pixel over the whole units in view, the texture size
 /// it draws at, and that texture's place on the canvas in device pixels from the
@@ -4841,9 +4836,11 @@ impl OndinApp {
         let (id, parent, parent_world, shape, sides) =
             (*id, *parent, *parent_world, *shape, *sides);
         let index = self.child_count(parent);
+        // Settings ▸ Canvas ▸ *New layers*. A chart keeps its own white ground.
+        let (frame_fill, shape_fill) = (self.prefs.canvas.frame_fill, self.prefs.canvas.shape_fill);
         Some(match shape {
             Tool::Frame => {
-                tools::create_artboard(id, parent, index, parent_world, start, corner, Color::WHITE)
+                tools::create_artboard(id, parent, index, parent_world, start, corner, frame_fill)
             }
             Tool::Chart => tools::create_chart(
                 id,
@@ -4856,24 +4853,12 @@ impl OndinApp {
                 ondin_core::chart::Chart::sample(self.rail.chart),
             ),
             Tool::Slice => tools::create_slice(id, parent, index, parent_world, start, corner),
-            Tool::Rect => tools::create_rect(
-                id,
-                parent,
-                index,
-                parent_world,
-                start,
-                corner,
-                default_shape_fill(),
-            ),
-            Tool::Ellipse => tools::create_ellipse(
-                id,
-                parent,
-                index,
-                parent_world,
-                start,
-                corner,
-                default_shape_fill(),
-            ),
+            Tool::Rect => {
+                tools::create_rect(id, parent, index, parent_world, start, corner, shape_fill)
+            }
+            Tool::Ellipse => {
+                tools::create_ellipse(id, parent, index, parent_world, start, corner, shape_fill)
+            }
             Tool::Polygon => tools::create_polygon(
                 id,
                 parent,
@@ -4882,7 +4867,7 @@ impl OndinApp {
                 start,
                 corner,
                 sides,
-                default_shape_fill(),
+                shape_fill,
             ),
             Tool::Star => tools::create_star(
                 id,
@@ -4892,7 +4877,7 @@ impl OndinApp {
                 start,
                 corner,
                 sides,
-                default_shape_fill(),
+                shape_fill,
             ),
             Tool::Line => tools::create_line(
                 id,
@@ -12517,6 +12502,51 @@ mod tests {
             node.children().iter().all(|c| !range.contains(c)),
             "the chart, not its parts"
         );
+    }
+
+    /// A drawn frame, shape and text start in Settings' *New layers* fills and
+    /// *Default size*.
+    /// flip: `create_tx` passing `Color::WHITE` for a frame → fails at "frame".
+    #[test]
+    fn a_drawn_layer_starts_in_the_settings_defaults() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let frame_fill = Color::from_rgb8(250, 240, 230);
+        let shape_fill = Color::from_rgba8(30, 60, 90, 200);
+        app.prefs.canvas.frame_fill = frame_fill;
+        app.prefs.canvas.shape_fill = shape_fill;
+        app.prefs.default_text_size = 13.0;
+        let mut made = |tool, at: f64| {
+            app.choose_tool(tool);
+            app.click_create(Point::new(at, -5000.0), false);
+            let [id] = *app.session.selection.ids() else {
+                panic!("{tool:?}: one layer selected");
+            };
+            app.session.doc.get(id).expect("created").clone()
+        };
+        let fill = |node: &ondin_core::Node| {
+            node.paint()
+                .fills
+                .first()
+                .and_then(|f| f.brush.literal().cloned())
+        };
+        let frame = made(Tool::Frame, -5000.0);
+        assert_eq!(
+            fill(&frame),
+            Some(ondin_core::Brush::Solid(frame_fill)),
+            "frame"
+        );
+        let ellipse = made(Tool::Ellipse, -2000.0);
+        assert_eq!(
+            fill(&ellipse),
+            Some(ondin_core::Brush::Solid(shape_fill)),
+            "shape"
+        );
+        let text = made(Tool::Text, 1000.0);
+        let NodeKind::Text { style, .. } = text.kind() else {
+            panic!("the text tool made {:?}", text.kind());
+        };
+        assert_eq!(style.font_size, 13.0, "text");
     }
 
     /// A chart on the page is one layer to every older door: a click there

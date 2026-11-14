@@ -2326,7 +2326,8 @@ pub fn suggestion(text: &str, names: &[&str]) -> Option<usize> {
 /// ([`suggestion`]) as a faint ghost after the caret that `Tab` fills. The list
 /// never filters, so its size never changes; typing lights the ghost's row,
 /// `↑`/`↓` move the light, `Enter` or `Tab` take it, `Escape` closes it and
-/// `Alt+↓` opens it. Nothing else commits the ghost. No names, no chevron.
+/// `Alt+↓` or the chevron opens it, focusing the edit. Nothing else commits the
+/// ghost. No names, no chevron.
 pub fn suggest_field(
     ui: &mut egui::Ui,
     size: egui::Vec2,
@@ -2464,6 +2465,16 @@ pub fn suggest_field(
                 was: text.clone(),
             },
         };
+        // The keys that drive the list are read while the edit holds the focus,
+        // so a chevron opened from the keyboard hands it over, caret at the end.
+        if list.open && !resp.has_focus() {
+            let end = egui::text::CCursor::new(text.chars().count());
+            out.state
+                .cursor
+                .set_char_range(Some(egui::text::CCursorRange::one(end)));
+            out.state.clone().store(&ctx, id);
+            resp.request_focus();
+        }
     }
     // Typing with the list open lights the row the ghost names.
     let ghost = suggestion(text, names).filter(|_| resp.has_focus() && at_end(text));
@@ -2472,9 +2483,10 @@ pub fn suggest_field(
     }
 
     // The ghost, in the hint's ink right after the text, cut before the chevron.
+    // Measured to the edit's box: `text_clip_rect` hugs the text, leaving no room.
     if let Some(g) = ghost {
         let x = out.galley_pos.x + out.galley.size().x;
-        let room = out.text_clip_rect.right() - x;
+        let room = resp.rect.right() - x;
         if room > 4.0 {
             let ink = ui.visuals().weak_text_color();
             let rest: String = names[g].chars().skip(text.chars().count()).collect();
@@ -2540,8 +2552,9 @@ fn ticked(text: &str, names: &[&str]) -> Option<usize> {
 }
 
 /// A [`suggest_field`]'s open list, under `field` with its left edge and at least
-/// its width: `hint`'s row, a rule, then `names`, the text it opened on ticked and
-/// the keys' row lit. Answers the row clicked.
+/// its width: `hint`'s row, a rule, then `names`, the text it opened on in the
+/// selection ground (one value, so no tick) and the keys' row in the hover's.
+/// Answers the row clicked.
 fn suggest_list(
     ui: &egui::Ui,
     id: egui::Id,
@@ -2567,7 +2580,7 @@ fn suggest_list(
         .fold(0.0_f32, f32::max);
     let w = field
         .width()
-        .max(MENU_LABEL_X + label_w + 8.0 + 2.0 * (MENU_PAD + MENU_BORDER))
+        .max(8.0 + label_w + 8.0 + 2.0 * (MENU_PAD + MENU_BORDER))
         .ceil();
     let size = egui::vec2(w, menu_height(names.len() + 1, 1));
     // The pointer moving over the list takes the light from the keys.
@@ -2595,7 +2608,7 @@ fn suggest_list(
                             0 => hint,
                             i => names[i - 1],
                         };
-                        let mut row = MenuRow::new("", label).checked(tick == Some(i));
+                        let mut row = MenuRow::new("", label).selected(tick == Some(i));
                         if let Some(l) = lit {
                             row = row.highlight(l == i);
                         }
@@ -9260,6 +9273,98 @@ mod tests {
         assert!(!list(&ctx).open, "Escape closes the list");
         assert_eq!(text, "sonnet", "and keeps the text");
         assert_eq!(ctx.memory(|m| m.focused()), field, "and the focus");
+    }
+
+    /// Opened from the keyboard on the chevron (`Tab` to it, `Space`), the list
+    /// answers `↓` and `Escape`, which closes the list and goes no further.
+    /// flip: `suggest_field` not focusing the edit when the chevron opens the
+    /// list → fails at "↓ moves the light".
+    #[test]
+    fn the_chevron_opened_from_the_keyboard_hands_the_keys_to_the_list() {
+        let ctx = egui::Context::default();
+        let mut text = String::new();
+        let field = suggest_typed(&ctx, &mut text, "");
+        let list = |ctx: &egui::Context| {
+            let id = field.expect("focused").with("list");
+            ctx.data(|d| d.get_temp::<SuggestList>(id))
+                .unwrap_or_default()
+        };
+        let none = egui::Modifiers::NONE;
+        suggest_frame(&ctx, &mut text, vec![key_event(egui::Key::Tab, none)]);
+        suggest_frame(&ctx, &mut text, vec![]);
+        let chevron = ctx.memory(|m| m.focused());
+        assert!(
+            chevron.is_some() && chevron != field,
+            "the fixture: Tab reached the chevron"
+        );
+        suggest_frame(&ctx, &mut text, vec![key_event(egui::Key::Space, none)]);
+        suggest_frame(&ctx, &mut text, vec![]);
+        assert!(list(&ctx).open, "Space opens it");
+        assert_eq!(list(&ctx).lit, Some(0), "lit on the value's row");
+        suggest_frame(&ctx, &mut text, vec![key_event(egui::Key::ArrowDown, none)]);
+        assert_eq!(list(&ctx).lit, Some(1), "↓ moves the light");
+        let mut escaped = false;
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                events: vec![key_event(egui::Key::Escape, none)],
+                ..Default::default()
+            },
+            |ui| {
+                let _focus = KeyboardFocus::begin(ui.ctx(), false);
+                hold_tab(ui);
+                let names = ["haiku", "sonnet", "opus"];
+                let size = egui::vec2(220.0, CONTROL_H);
+                suggest_field(
+                    ui,
+                    size,
+                    &mut text,
+                    "Its default",
+                    &names,
+                    "Suggested models",
+                );
+                // What a modal reads after its body, as Settings does.
+                escaped = ui.input(|i| i.key_pressed(egui::Key::Escape));
+            },
+        );
+        assert!(!list(&ctx).open, "Escape closes the list");
+        assert!(!escaped, "and is spent there, so the card stays open");
+    }
+
+    /// Typing the start of a name draws the rest of it as a ghost after the text.
+    /// flip: room for the ghost measured to `text_clip_rect` → fails at "the ghost
+    /// is drawn": that rect hugs the text.
+    #[test]
+    fn typing_draws_the_ghost() {
+        let ctx = egui::Context::default();
+        let mut text = String::new();
+        suggest_typed(&ctx, &mut text, "hai");
+        assert_eq!(text, "hai", "the fixture: typed into the field");
+        let out = ctx.run_ui(Default::default(), |ui| {
+            let _focus = KeyboardFocus::begin(ui.ctx(), false);
+            hold_tab(ui);
+            let names = ["haiku", "sonnet", "opus"];
+            let size = egui::vec2(220.0, CONTROL_H);
+            suggest_field(
+                ui,
+                size,
+                &mut text,
+                "Its default",
+                &names,
+                "Suggested models",
+            );
+        });
+        let texts: Vec<String> = out
+            .shapes
+            .iter()
+            .filter_map(|c| match &c.shape {
+                egui::Shape::Text(t) => Some(t.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            texts.iter().any(|t| t == "ku"),
+            "the ghost is drawn: {texts:?}"
+        );
     }
 
     /// A note too long for its row stops short of the switch, cut with an

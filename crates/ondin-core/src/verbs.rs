@@ -604,13 +604,40 @@ fn attempt<T: serde::de::DeserializeOwned>(v: &Value) -> Result<T, Miss> {
 }
 
 /// The path of a field `serde_ignored` cannot see: one inside a gradient brush,
-/// whose `#[serde(flatten)]` drops what it does not read, or inside an untagged
-/// grid track (`minmax` or `repeat`). `None` when there is none.
+/// whose `#[serde(flatten)]` drops what it does not read; inside an untagged
+/// grid track (`minmax` or `repeat`); inside an effect's internally tagged
+/// kind, its shadow's colour included; or inside a solid brush's colour, which
+/// the untagged `BrushSource` buffers. `None` when there is none.
 fn unseen_field(v: &Value) -> Option<Vec<Option<Step>>> {
+    /// A colour's fields as a `DynamicColor` writes them, which a hex is
+    /// loosened into: a plain colour's components among them.
+    fn colour_fields() -> Option<Vec<&'static str>> {
+        struct_fields::<peniko::color::DynamicColor>().map(<[_]>::to_vec)
+    }
+    /// An effect kind's fields by its `type`, the tag among them; `None` for a
+    /// map that is no effect kind.
+    fn effect_fields(map: &serde_json::Map<String, Value>) -> Option<Vec<&'static str>> {
+        let fields = match map.get("type")?.as_str()? {
+            "drop_shadow" | "inner_shadow" => struct_fields::<crate::effect::Shadow>()?.to_vec(),
+            "layer_blur" | "background_blur" => vec!["radius"],
+            "filters" => struct_fields::<crate::effect::Filters>()?.to_vec(),
+            _ => return None,
+        };
+        Some([vec!["type"], fields].concat())
+    }
+    /// The key a shadow's colour is walked under, one no agent writes.
+    const COLOUR: &str = "\0colour";
     fn walk(v: &Value, key: &str, at: &mut Vec<Option<Step>>) -> Option<Vec<Option<Step>>> {
         match v {
             Value::Object(map) => {
+                let effect = if key == "kind" {
+                    effect_fields(map)
+                } else {
+                    None
+                };
                 let allowed: Option<Vec<&str>> = match key {
+                    _ if effect.is_some() => effect.clone(),
+                    "Solid" | COLOUR => colour_fields(),
                     "Gradient" => struct_fields::<peniko::Gradient>().map(|f| {
                         let mut f = f.to_vec();
                         f.extend(["transform", "opacity"]);
@@ -631,7 +658,11 @@ fn unseen_field(v: &Value) -> Option<Vec<Option<Step>>> {
                 }
                 for (k, child) in map {
                     at.push(Some(Step::Key(k.clone())));
-                    let found = walk(child, k, at);
+                    let child_key = match k.as_str() {
+                        "color" if effect.is_some() => COLOUR,
+                        k => k,
+                    };
+                    let found = walk(child, child_key, at);
                     at.pop();
                     if found.is_some() {
                         return found;

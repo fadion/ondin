@@ -478,6 +478,35 @@ fn a_gradients_and_a_tracks_unknown_field_is_refused() {
     assert!(refused.contains("step"), "a track's: {refused}");
 }
 
+/// A field an effect's kind or a solid brush's colour has no place for is
+/// refused naming it: the tagged and untagged shapes hide it from serde.
+/// flip: `unseen_field` without its effect arm → fails at "the shadow's".
+#[test]
+fn an_effects_and_a_colours_unknown_field_is_refused() {
+    let (mut doc, mut ids, page) = blank();
+    let f = frame_on(&mut doc, &mut ids, page);
+    let n = json!([f.to_wire()]);
+    let effects = |effect: Value| json!({ "nodes": n, "effects": [effect] });
+    let shadow = json!({ "kind": "DropShadow", "color": "#000000", "blur": 4,
+                         "offset": [0, 2], "spread": 0 });
+    run(&mut doc, &mut ids, "set_effects", effects(shadow.clone()));
+    let mut blnd = shadow;
+    blnd["blnd"] = json!("Multiply");
+    let refused = why(&doc, &mut ids, "set_effects", effects(blnd));
+    assert!(refused.contains("blnd"), "the shadow's: {refused}");
+    let nested = json!({ "kind": { "type": "DropShadow", "color": "#000000", "blur": 4,
+                                   "offset": [0, 2], "spread": 0, "blnd": "Multiply" } });
+    let refused = why(&doc, &mut ids, "set_effects", effects(nested));
+    assert!(refused.contains("blnd"), "the nested shadow's: {refused}");
+    let blur = json!({ "kind": "LayerBlur", "radius": 4, "opacity": 0.5 });
+    let refused = why(&doc, &mut ids, "set_effects", effects(blur));
+    assert!(refused.contains("opacity"), "the blur's: {refused}");
+    let solid = json!({ "Solid": { "components": [1, 0, 0, 1], "cs": "srgb", "alpha": 0.5 } });
+    let fills = json!({ "nodes": n, "fills": [{ "brush": solid }] });
+    let refused = why(&doc, &mut ids, "set_fills", fills);
+    assert!(refused.contains("alpha"), "the colour's: {refused}");
+}
+
 /// What `get_node` writes reads back: a line height as `"120%"`, an effect's
 /// blend by its label.
 /// flip: `css_length` refusing a `%` → fails at "a percent line height".

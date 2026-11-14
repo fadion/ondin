@@ -813,12 +813,36 @@ fn overlaps(a: Rect, b: Rect) -> bool {
 
 /// The points on a curved `seg` where a line from `from` touches it: the roots of
 /// `(B(t) − from) × B′(t)`. A straight segment has none: a line from a point on
-/// its extension runs along it rather than touching it.
+/// its extension runs along it rather than touching it. A curve drawn straight
+/// (its handles on its chord) is a straight segment too, where every sample
+/// would otherwise be a root.
 fn tangents(seg: PathSeg, from: Point, out: &mut Vec<Point>) {
-    if !matches!(seg, PathSeg::Line(_)) {
+    if !matches!(seg, PathSeg::Line(_)) && !drawn_straight(seg) {
         roots_on(seg, from, |d, v| d.cross(v), out);
     }
 }
+
+/// Whether every control point of `seg` lies on the line through its ends,
+/// within [`STRAIGHT_EPS`]; a curve with both ends together is straight only
+/// when its handles are there too.
+fn drawn_straight(seg: PathSeg) -> bool {
+    let (p0, inner, p1): (Point, &[Point], Point) = match &seg {
+        PathSeg::Line(_) => return true,
+        PathSeg::Quad(q) => (q.p0, &[q.p1][..], q.p2),
+        PathSeg::Cubic(c) => (c.p0, &[c.p1, c.p2][..], c.p3),
+    };
+    let d = p1 - p0;
+    let len = d.hypot();
+    inner.iter().all(|p| match len > STRAIGHT_EPS {
+        true => ((*p - p0).cross(d) / len).abs() <= STRAIGHT_EPS,
+        false => p.distance(p0) <= STRAIGHT_EPS,
+    })
+}
+
+/// How far, in world units, a handle may sit off its curve's chord for the
+/// curve to count as drawn straight: float noise from a line turned into a
+/// curve, far below anything drawn.
+const STRAIGHT_EPS: f64 = 1e-6;
 
 /// The feet on `seg` of the lines from `from` that meet it at a right angle: the
 /// roots of `(B(t) − from) · B′(t)`. A line's is its projection, solved exactly
@@ -2079,6 +2103,30 @@ mod tests {
         s.outlines.from.clear();
         let bare = point_target(Point::new(27.0, 41.0), &s, 6.0).map(|m| m.kind);
         assert_eq!(bare, Some(PointKind::OnPath), "no tangent without a from");
+    }
+
+    /// A curve drawn straight, its handles on its chord, gives no tangent from an
+    /// anchor on its line, as a line gives none.
+    ///
+    /// flip: `tangents` without its `drawn_straight` check → fails at "none".
+    #[test]
+    fn a_curve_drawn_straight_has_no_tangents() {
+        let straight = PathSeg::Cubic(ondin_core::kurbo::CubicBez::new(
+            (0.0, 0.0),
+            (100.0 / 3.0, 0.0),
+            (200.0 / 3.0, 0.0),
+            (100.0, 0.0),
+        ));
+        let mut touching = Vec::new();
+        tangents(straight, Point::new(150.0, 0.0), &mut touching);
+        assert!(touching.is_empty(), "none: {touching:?}");
+        let quad = PathSeg::Quad(ondin_core::kurbo::QuadBez::new(
+            (0.0, 0.0),
+            (50.0, 0.0),
+            (100.0, 0.0),
+        ));
+        tangents(quad, Point::new(-20.0, 0.0), &mut touching);
+        assert!(touching.is_empty(), "none: {touching:?}");
     }
 
     /// Drawn from (30, 80), a point near the line along y = 0 lands on its foot at

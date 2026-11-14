@@ -1693,20 +1693,19 @@ impl OndinApp {
         use crate::assistant::{Level, ai::Harness};
         let picked = a.harness();
         let mut next = picked;
-        labelled_row(ui, "Agent", |ui| {
-            ui.spacing_mut().button_padding.y = 0.0;
-            egui::ComboBox::from_id_salt("settings-assistant-agent")
-                .icon(ui::combo_chevron)
-                .width(PREF_CONTROL_W)
-                .selected_text(ui::combo_text(picked.map_or("Off", |h| h.label())))
-                .show_ui(ui, |ui| {
-                    ui::menu_rows(ui);
-                    ui.selectable_value(&mut next, None, "Off");
-                    for h in Harness::ALL {
-                        ui.selectable_value(&mut next, Some(h), h.label());
-                    }
-                });
-        });
+        choice_row(
+            ui,
+            "Agent",
+            "settings-assistant-agent",
+            PREF_CONTROL_W,
+            picked.map_or("Off", |h| h.label()),
+            |ui| {
+                ui.selectable_value(&mut next, None, "Off");
+                for h in Harness::ALL {
+                    ui.selectable_value(&mut next, Some(h), h.label());
+                }
+            },
+        );
         if next != picked {
             // Each harness's last values come back within the session.
             let mem = &mut self.assistant.remembered;
@@ -1774,66 +1773,70 @@ impl OndinApp {
                 ),
                 None => {}
             }
-            ui.add_space(ROW_GAP);
-            labelled_row(ui, "Model", |ui| {
-                ui::suggest_field(
-                    ui,
-                    egui::vec2(PREF_CONTROL_W, FIELD_H),
-                    &mut a.model,
-                    "Its default",
-                    on.map_or(&[][..], |h| h.model_suggestions()),
-                    "Suggested models",
-                )
-            });
-            let levels = on.map_or(&[][..], |h| h.effort_levels());
-            if !levels.is_empty() {
+            // The caption above comes and goes with the lookup; under an id of
+            // their own the fields below keep theirs, and the focus with them.
+            let below = egui::UiBuilder::new().id(egui::Id::new("settings-assistant-below-path"));
+            ui.scope_builder(below, |ui| {
                 ui.add_space(ROW_GAP);
-                labelled_row(ui, "Effort", |ui| {
-                    ui.spacing_mut().button_padding.y = 0.0;
+                labelled_row(ui, "Model", |ui| {
+                    ui::suggest_field(
+                        ui,
+                        egui::vec2(PREF_CONTROL_W, FIELD_H),
+                        &mut a.model,
+                        "Its default",
+                        on.map_or(&[][..], |h| h.model_suggestions()),
+                        "Suggested models",
+                    )
+                });
+                let levels = on.map_or(&[][..], |h| h.effort_levels());
+                if !levels.is_empty() {
+                    ui.add_space(ROW_GAP);
                     let shown = match a.effort.is_empty() {
                         true => "Default".to_owned(),
                         false => effort_label(&a.effort),
                     };
                     let mut effort = a.effort.clone();
-                    egui::ComboBox::from_id_salt("settings-assistant-effort")
-                        .icon(ui::combo_chevron)
-                        .width(PREF_CONTROL_W)
-                        .selected_text(ui::combo_text(&shown))
-                        .show_ui(ui, |ui| {
-                            ui::menu_rows(ui);
+                    choice_row(
+                        ui,
+                        "Effort",
+                        "settings-assistant-effort",
+                        PREF_CONTROL_W,
+                        &shown,
+                        |ui| {
                             ui.selectable_value(&mut effort, String::new(), "Default");
                             for l in levels {
                                 ui.selectable_value(&mut effort, (*l).to_owned(), effort_label(l));
                             }
-                        });
+                        },
+                    );
                     a.effort = effort;
-                });
-            }
-            ui.add_space(ROW_GAP);
-            let level = a.level();
-            labelled_row(ui, "Access", |ui| {
-                let at = Level::ALL.iter().position(|l| *l == level).unwrap_or(1);
-                let picked = ui::segmented_tipped(
-                    ui,
-                    PREF_CONTROL_W,
-                    ui::SEGMENT_CELL_H,
-                    3,
-                    at,
-                    |_| true,
-                    |i| crate::assistant::panel::level_tip(Level::ALL[i]),
-                    |p, i, r, on| {
-                        ui::segment_label(p, r, Level::ALL[i].label(), on);
-                    },
-                );
-                if let Some(i) = picked {
-                    a.access = Level::ALL[i].key().to_owned();
                 }
+                ui.add_space(ROW_GAP);
+                let level = a.level();
+                labelled_row(ui, "Access", |ui| {
+                    let at = Level::ALL.iter().position(|l| *l == level).unwrap_or(1);
+                    let picked = ui::segmented_tipped(
+                        ui,
+                        PREF_CONTROL_W,
+                        ui::SEGMENT_CELL_H,
+                        3,
+                        at,
+                        |_| true,
+                        |i| crate::assistant::panel::level_tip(Level::ALL[i]),
+                        |p, i, r, on| {
+                            ui::segment_label(p, r, Level::ALL[i].label(), on);
+                        },
+                    );
+                    if let Some(i) = picked {
+                        a.access = Level::ALL[i].key().to_owned();
+                    }
+                });
+                section(ui, "Instructions");
+                // Held at its rows, scrolling past them: the modal keeps its size.
+                let mut area = ui::TextArea::new("Added to every question, after Ondin's own", 6);
+                area.max_rows = 6;
+                ui::text_area(ui, &mut a.instructions, area);
             });
-            section(ui, "Instructions");
-            // Held at its rows, scrolling past them: the modal keeps its size.
-            let mut area = ui::TextArea::new("Added to every question, after Ondin's own", 6);
-            area.max_rows = 6;
-            ui::text_area(ui, &mut a.instructions, area);
         });
     }
 }

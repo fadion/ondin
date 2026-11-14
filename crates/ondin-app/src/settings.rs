@@ -1870,19 +1870,7 @@ fn labelled_row_busy<R>(
                         .color(ui::switch_row_ink(ui.is_enabled())),
                 );
                 if busy {
-                    let (rect, _) = ui.allocate_exact_size(
-                        egui::vec2(ui::SMALL_PT, ui::SMALL_PT),
-                        egui::Sense::hover(),
-                    );
-                    let now = ui.input(|i| i.time);
-                    ui::paint_spinner(
-                        ui.painter(),
-                        rect.center(),
-                        ui::SMALL_PT,
-                        theme::text::faint(),
-                        now,
-                    );
-                    ui.ctx().request_repaint();
+                    ui::spinner(ui, ui::SMALL_PT, theme::text::faint());
                 }
             });
             out

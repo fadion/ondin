@@ -1729,11 +1729,7 @@ fn form(
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
             if busy {
-                ui.add(
-                    egui::Spinner::new()
-                        .size(ui::SMALL_PT)
-                        .color(theme::text::faint()),
-                );
+                ui::spinner(ui, ui::SMALL_PT, theme::text::faint());
             }
             ui.label(
                 egui::RichText::new(foot)
@@ -2283,11 +2279,7 @@ fn loading(ui: &mut egui::Ui, what: &str) {
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 10.0;
-        ui.add(
-            egui::Spinner::new()
-                .size(ui::TITLE_PT)
-                .color(theme::text::dim()),
-        );
+        ui::spinner(ui, ui::TITLE_PT, theme::text::dim());
         ui.label(
             egui::RichText::new(what)
                 .size(ui::CONTROL_PT)

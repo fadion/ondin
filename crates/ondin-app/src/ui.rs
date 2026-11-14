@@ -6119,6 +6119,16 @@ pub fn paint_spinner(
     paint_glyph_centred(painter, icon::CIRCLE_NOTCH, center, size, color, angle);
 }
 
+/// [`paint_spinner`] laid out as a widget: a `size` square, turning, with the
+/// frames it needs asked for.
+pub fn spinner(ui: &mut egui::Ui, size: f32, color: egui::Color32) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+    let now = ui.input(|i| i.time);
+    paint_spinner(ui.painter(), rect.center(), size, color, now);
+    ui.ctx().request_repaint();
+    resp
+}
+
 /// The hairline round a [`segmented`] track, and the width the cells give up to it
 /// on every side; subtracted in one place and painted in another.
 const SEGMENT_BORDER: f32 = 1.0;

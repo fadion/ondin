@@ -37,7 +37,8 @@ pub(crate) trait Documents {
     /// The open document at `path`.
     fn session(&mut self, path: &Path) -> Option<&mut EditorSession>;
     /// The document at `path` changed through a tool: `serve` writes it, as the
-    /// window does a tab behind. An error is why the edit is not on disk.
+    /// window does a tab behind. An error is why the edit is not on disk; a
+    /// host that closed the document with it has dropped the edit too.
     fn committed(&mut self, path: &Path) -> Result<(), String>;
     /// The library as it now stands on disk, or `None` with no base folder.
     fn library(&mut self) -> Option<&Library>;
@@ -621,6 +622,11 @@ impl Engine {
                 map.insert("layers".into(), own);
             }
             if let Err(why) = docs.committed(&path) {
+                // A host that dropped its copy rather than write it (`serve`,
+                // finding the file changed outside) holds the edit nowhere.
+                if docs.session(&path).is_none() {
+                    return Output::error(why);
+                }
                 let line = format!("The edit is made but not written to the file: {why}");
                 match output.structured.as_mut() {
                     Some(Value::Object(map)) => {

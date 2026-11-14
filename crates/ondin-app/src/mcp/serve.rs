@@ -40,6 +40,8 @@ pub(crate) struct Headless {
     /// The installed fonts, read the first time a document or `list_fonts`
     /// needs them.
     fonts: Option<SystemFonts>,
+    /// How many undo steps a library document keeps across opens; `0` keeps none.
+    history: u64,
 }
 
 impl Headless {
@@ -49,6 +51,7 @@ impl Headless {
             library,
             scanned: None,
             fonts: None,
+            history: crate::prefs::Prefs::default().history_size,
         }
     }
 
@@ -90,18 +93,18 @@ impl Documents for Headless {
             return Ok(same.clone());
         }
         if !self.open.contains_key(&path) {
-            let read = |e: std::io::Error| format!("cannot read {}: {e}", path.display());
-            // Looked at before the bytes are read, so a write in between shows.
-            let meta = std::fs::metadata(&path).map_err(read)?;
-            let bytes = std::fs::read(&path).map_err(read)?;
-            let doc = ondin_core::io::load(&bytes)
-                .map_err(|e| format!("cannot load {}: {e}", path.display()))?;
+            // The undo history the person's window kept for these bytes is
+            // resumed, so a later write keeps it (`Headless::save`).
+            let keep = self.library.is_some() && self.history > 0;
+            let root = self.library.as_deref().unwrap_or(path.as_path());
+            let (doc, history, stamp) = crate::app::read_opened(&path, root, keep)
+                .map_err(|e| format!("cannot open {}: {e}", path.display()))?;
             let mut session = EditorSession::new();
             session.adopt_document(doc, Some(path.clone()));
-            session.disk = Some(crate::library::disk::Stamp::from_meta(
-                &meta,
-                crate::library::history::digest(&bytes),
-            ));
+            session.disk = stamp;
+            if let Some(history) = history {
+                session.resume_history(history);
+            }
             self.open.insert(path.clone(), session);
             self.load_fonts(&path);
         }
@@ -145,6 +148,19 @@ impl Documents for Headless {
         }
         let digest = crate::library::store::write_document_digest(path, &session.doc)
             .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+        // A library document's kept history is tied to its file's bytes, so it
+        // is written again beside them, as the window's write does.
+        if let Some(root) = self.library.as_deref().filter(|r| path.starts_with(r))
+            && self.history > 0
+            && let Some(id) = session.doc.meta().id.clone()
+        {
+            let limit = usize::try_from(self.history).unwrap_or(usize::MAX);
+            if let Err(e) =
+                crate::library::history::write(root, &id, &digest, session.history.saved(limit))
+            {
+                log::warn!(target: "ondin", "keeping the undo history of {}: {e}", path.display());
+            }
+        }
         session.disk = crate::library::disk::Stamp::of(path, digest);
         session.mark_saved(path.to_path_buf());
         Ok(())
@@ -254,6 +270,7 @@ pub(crate) fn run() -> Result<(), String> {
         .map_err(|e| format!("ondin serve: cannot listen: {e}"))?;
     let prefs = crate::prefs::Prefs::load();
     let mut docs = Headless::new(crate::library::root(prefs.base_folder.as_deref()));
+    docs.history = prefs.history_size;
     let mut engine = Engine::default();
     let started = Instant::now();
     let mut looked = Instant::now();
@@ -331,10 +348,11 @@ mod tests {
     }
 
     /// An agent's write through `serve` is not written over a file changed on
-    /// disk since it was read: the outside change stays, and the call says so.
+    /// disk since it was read: the outside change stays, and the call is an
+    /// error, since `serve` dropped the edit with its copy.
     ///
     /// flip: `Headless::save` without its stamp check → fails at "the clash is
-    /// reported".
+    /// reported"; `Engine::answer` without its dropped-copy arm → fails there too.
     #[test]
     fn serve_does_not_write_over_a_change_on_disk() {
         let dir = std::env::temp_dir().join(format!("ondin-serve-clash-{}", std::process::id()));
@@ -359,13 +377,52 @@ mod tests {
         let outside = ondin_core::io::save(&ondin_core::Document::new(ids.mint())).unwrap();
         std::fs::write(&file, &outside).unwrap();
         let out = run("set_name", rename("Mine"));
-        let unsaved = out.structured.as_ref().and_then(|v| v.get("unsaved"));
+        assert!(out.is_error, "the clash is reported: {:?}", out.content);
         assert!(
-            unsaved.is_some(),
-            "the clash is reported: {:?}",
-            out.content
+            out.structured.is_none(),
+            "no revision for an edit that exists nowhere"
         );
         assert_eq!(std::fs::read(&file).unwrap(), outside, "kept");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `serve` resumes a library document's kept undo history and writes it
+    /// again beside each write, so a later open still finds the steps.
+    ///
+    /// flip: `Headless::save` not writing the history → fails at "kept";
+    /// `Headless::open` not resuming it → fails at "resumed".
+    #[test]
+    fn serve_keeps_a_library_documents_undo_history() {
+        let root = crate::kits::picker::tests::temp_root("serve-history");
+        let mut ids = ondin_core::IdSource::new(crate::session::random_actor());
+        let mut doc = ondin_core::Document::new(ids.mint());
+        let page = doc.first_page().to_wire();
+        let path = crate::library::store::file_document(&root, None, "Plan", &mut doc).unwrap();
+        let id = doc.meta().id.clone().expect("filed with an id");
+        let kind = ondin_core::verbs::example("NodeKind").unwrap();
+        let create = json!({ "parent": page, "kind": kind, "name": "Chart" });
+        let document = json!({ "document": path.display().to_string() });
+        let kept = || {
+            let digest = crate::library::history::digest(&std::fs::read(&path).unwrap());
+            crate::library::history::read(&root, &id, &digest).map_or(0, |h| h.undo.len())
+        };
+        // Two runs of `serve`, each opening the file afresh.
+        for run in 1..=2 {
+            let mut docs = Headless::new(Some(root.clone()));
+            let mut engine = Engine::default();
+            let mut call = |docs: &mut Headless, tool: &str, args: serde_json::Value| {
+                let (reply, _answer) = std::sync::mpsc::sync_channel(1);
+                let out = engine.handle(docs, Call::new(1, None, tool, args, reply));
+                assert!(!out.is_error, "{tool}: {:?}", out.content);
+            };
+            call(&mut docs, "use_document", document.clone());
+            if run == 2 {
+                let depth = docs.open.values().next().unwrap().history.undo_depth();
+                assert_eq!(depth, 1, "resumed");
+            }
+            call(&mut docs, "create_node", create.clone());
+            assert_eq!(kept(), run, "kept");
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

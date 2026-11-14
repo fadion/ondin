@@ -571,7 +571,20 @@ impl OndinApp {
             )
             .on_hover_ui(|ui| {
                 let head = format!("{} has no pixels to preview", spec.format.label());
-                ui.label(match self.vector_note(subject, &spec) {
+                // Worked out once per revision, not on every hover frame: it
+                // writes the file to read it.
+                let id = egui::Id::new("export-vector-note");
+                let key = format!("{subject:?} {spec:?} {}", self.session.revision());
+                let kept = ui.data(|d| d.get_temp::<(String, Option<String>)>(id));
+                let note = match kept {
+                    Some((k, note)) if k == key => note,
+                    _ => {
+                        let note = self.vector_note(subject, &spec);
+                        ui.data_mut(|d| d.insert_temp(id, (key, note.clone())));
+                        note
+                    }
+                };
+                ui.label(match note {
                     None => head,
                     Some(note) => format!("{head}. In this file: {note}"),
                 });

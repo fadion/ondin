@@ -846,6 +846,8 @@ pub struct OndinApp {
     pub(crate) prefs: crate::prefs::Prefs,
     /// The Settings modal's staged edits (`crate::settings`); `Some` is the modal open.
     pub(crate) settings: Option<crate::settings::Settings>,
+    /// The Settings tab shown last this run, which the modal opens on.
+    pub(crate) settings_tab: crate::settings::SettingsTab,
     /// The export spec whose settings block is showing. One at a time: two open blocks
     /// would push the export button off the panel.
     pub(crate) export_row_open: Option<usize>,
@@ -1960,6 +1962,7 @@ impl OndinApp {
             stroke_sides_open: Vec::new(),
             prefs,
             settings: None,
+            settings_tab: Default::default(),
             export_row_open: None,
             export_custom_sizes: None,
             export_menu: false,
@@ -2643,7 +2646,7 @@ impl OndinApp {
             }
             Action::Tab(key) => self.tab_key(key),
             // The top bar's door; it cannot arrive with the modal already up.
-            Action::OpenSettings => self.toggle_settings(ctx),
+            Action::OpenSettings => self.toggle_settings(ctx, None),
             Action::Palette => self.toggle_palette(ctx),
             Action::Cheatsheet => self.open_cheatsheet(crate::cheatsheet::Opened::Editor),
             // No dialog once a destination is known this session.
@@ -14415,7 +14418,7 @@ mod library_wiring_tests {
             app.session.selection.set_one(rect);
             match modal {
                 "none" => {}
-                "settings" => app.toggle_settings(ctx),
+                "settings" => app.toggle_settings(ctx, None),
                 "confirming_close" => app.confirming_close = true,
                 "recovery" => {
                     app.recovery
@@ -16589,7 +16592,7 @@ mod library_wiring_tests {
             let mut app = app_at(&ctx, root_dir.clone());
             let settled = kids(&app);
             match arm {
-                0 => app.toggle_settings(&ctx),
+                0 => app.toggle_settings(&ctx, None),
                 1 => app.confirming_close = true,
                 _ => app
                     .recovery

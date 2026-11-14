@@ -1200,9 +1200,19 @@ fn sweep_on(theme: Theme) {
         a.type_menu = Some(crate::app::TypeTab::Character)
     });
     check("type popover", app, found);
-    let mut app = with_a_rect(&ctx);
-    let found = opened(&ctx, &mut app, |c, a| a.toggle_settings(c));
-    check("settings", app, found);
+    // Every tab, since each shows only its own rows.
+    let names = [
+        "settings: General",
+        "settings: Canvas",
+        "settings: Text",
+        "settings: Assets",
+        "settings: Assistant",
+    ];
+    for (tab, name) in crate::settings::SettingsTab::ALL.into_iter().zip(names) {
+        let mut app = with_a_rect(&ctx);
+        let found = opened(&ctx, &mut app, |c, a| a.toggle_settings(c, Some(tab)));
+        check(name, app, found);
+    }
     // The assistant's panel: its head's Access dropdown, and a reply's options.
     let mut app = with_a_rect(&ctx);
     let found = opened(&ctx, &mut app, |_, a| {

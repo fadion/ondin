@@ -415,18 +415,39 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
 
 - Rightmost: `icon::SLIDERS`, 28pt, ten points clear of the document's controls. The update chip
   sits between it and that gap. The window's caption buttons are in the tab strip above.
-- Opens `settings.rs`'s modal: the theme and *Show resource meter* (under **Appearance**; the
-  library's Settings shares the theme row only), nudge step, the **Canvas** rows (*Zoom with the
-  scroll wheel* with its caption, `tools.md` *The wheel*; *Ruler guides colour* and *Ruler guides thickness*, *Adaptive pixel grid* with its caption, and *Pixel grid
-  colour*, dimmed with *Turn off Adaptive pixel grid to pick a colour* while adaptive is on;
-  `app-rulers-guides.md`, `prefs::CanvasPrefs`), *Show tree guides* and *Collapse groups on open* (under a
-  **Layers** eyebrow), *Default font* (under **Text**: the typography panel's family dropdown,
-  its glyph `warn()` with a tooltip when the family is `Missing`, §5.4a, and *Check spelling*), the web-font switch and
-  cache row, then **Assets** (*Assets browser*, below), then **Assistant** (`assistant.md` §5). `Ctrl+,` opens it (and only opens:
-  `input::resolve` is not called while a modal is up). Staged; writes on *Save changes*.
-- The sections scroll between the title and the footer once the card would be taller than the
-  window, with no bar. The scroll area takes the sections' height as last measured, capped by the
-  window, as `min_scrolled_height`: an `Area` hands a scroll area last frame's size, so a
+- Opens `settings.rs`'s modal, `SETTINGS_W` (480) wide so five tab labels fit their cells; the
+  library's Settings and the confirmations stay `CARD_W` (376). Under the title row, a full-width
+  `ui::segmented` strip of `SettingsTab`s at `ui::SEGMENT_CELL_H` picks what the body shows:
+
+  | Tab | Rows |
+  | --- | --- |
+  | **General** | **Layers** (*Show tree guides*, *Collapse groups on open*), **Appearance** (the theme track, *Show resource meter*; the library's Settings shares the theme row only) |
+  | **Canvas** | **Wheel** (*Zoom with the scroll wheel* and its caption, `tools.md` *The wheel*), **Nudge** (*Step*, *Shift*), **Guides and grid** (*Ruler guides colour* and *thickness*, *Adaptive pixel grid* and its caption, *Pixel grid colour*, dimmed with *Turn off Adaptive pixel grid to pick a colour* while adaptive is on; `app-rulers-guides.md`, `prefs::CanvasPrefs`) |
+  | **Text** | no eyebrow, which would repeat the tab's name: *Default font* (the typography panel's family dropdown, its glyph `warn()` with a tooltip when the family is `Missing`, §5.4a) and its caption, *Check spelling*; then **Web fonts** (the switch, its caption, the cache row) |
+  | **Assets** | *Assets browser*, below |
+  | **Assistant** | `assistant.md` §5 |
+
+  A tab with no leading eyebrow starts `TITLE_GAP` under the strip. Every labelled row's control
+  fills one value column, `PREF_CONTROL_W` (220), so their edges line up down a tab.
+- The tabs are one form: switching keeps every edit, *Save changes* writes them all, and *Cancel*,
+  Escape and the backdrop discard them all. A tab holding a row that differs from the saved prefs
+  wears a dot after its label (`ui::segment_label_marked`, from `Settings::dirty_tabs`), so Save
+  never surprises. `dirty_tabs` destructures the whole struct, so a new field cannot be left off
+  every tab (`a_tab_holding_an_edit_wears_the_dot`).
+- `OndinApp::settings_tab` is the tab shown last this run, never saved. `toggle_settings(ctx,
+  tab)`: `None` (the top-bar button, `Ctrl+,`, `menu::Item::Settings`) toggles the card, opening
+  on the last tab; `Some(tab)` is a door into that tab and never closes it, turning an open card
+  instead (the assets browser's *Open settings* → Assets, the assistant panel's → Assistant;
+  `a_door_opens_its_tab`). `Ctrl+,` only
+  opens: `input::resolve` is not called while a modal is up. While it is open, `Ctrl+Tab` /
+  `Ctrl+Shift+Tab` step the tabs, wrapping (`settings_ui` reads them; the document tabs' reader is
+  gated off under a modal; `ctrl_tab_steps_the_tabs`).
+- The body is one height whichever tab shows (`every_tab_shows_in_one_card`): as the card opens,
+  `measure_tabs` lays every tab out once into invisible sizing-pass children on a copy of the form,
+  and the tallest is the body's height, capped by the window's room (never under `MIN_BODY_H`).
+  A tab that grows while open (a key field shown) grows the card once. Past the cap the body
+  scrolls between the strip and the footer, with no bar, each tab at its own offset. ⚠️ The height
+  is asked as `min_scrolled_height` too: an `Area` hands a scroll area last frame's size, so a
   `max_height` alone shrinks and never grows back
   (`settings::the_sections_scroll_and_the_footer_stays_on_screen`).
 - Not a `TopMenu` value. Panel-owned preferences stay on their panel (export habits in the export
@@ -1013,8 +1034,8 @@ Open-source icons and stock photos, inserted with their credit (`Node::credit`, 
   box resized so its longer side is the size field's (`edit::resize_to`, as the inspector's W and H
   would, so its layers follow the author's constraints), then centred, as one *Insert icon* step
   with no credit.
-- **Settings ▸ Assets**, after the web fonts: a caption, then *Icon sets* (the library's icon
-  packs after the remote sets, noted *Kit in your library · v4*) and *Photos*, a
+- **Settings ▸ Assets**, its own tab: a caption, then the **Icon sets** eyebrow (the library's icon
+  packs after the remote sets, noted *Kit in your library · v4*) and the **Photos** eyebrow, a
   `ui::switch_row_noted` per set or service noted with its licence or what it needs; under a keyed
   service that is on, its key in `ui::secret_field` and a caption saying where a key is made and
   that it goes to that service only; *Photo size* (*Small · 400 px*, *Regular · 1080 px*, *Full

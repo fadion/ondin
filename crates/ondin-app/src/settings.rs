@@ -32,8 +32,12 @@ use crate::prefs::{CanvasPrefs, Prefs, ThemePref};
 use crate::theme::{self, color, icon};
 use crate::ui::{self, FieldButton, Prefix, Scrub, Suffix};
 
-/// Width of the card, border and padding included.
+/// Width of a settings-shaped card, border and padding included: the library's
+/// Settings and the confirmations.
 pub(crate) const CARD_W: f32 = 376.0;
+/// The editor's Settings card: wide enough for five tab labels in their cells
+/// and a [`PREF_CONTROL_W`] value column beside the longest row label.
+pub(crate) const SETTINGS_W: f32 = 480.0;
 /// The card's side inset: a canvas card's, so a modal and Batch rename are one
 /// object. Its title and footer rows are full height, so the frame has no
 /// margin above or below.
@@ -68,18 +72,59 @@ const BUTTON_H: f32 = FIELD_H;
 const BUTTON_PAD_X: f32 = ui::LABEL_BUTTON_PAD_X;
 /// Between two controls on one row: the inspector's.
 pub(crate) const COL_GAP: f32 = ui::CARD_COL_GAP;
-/// The card's title and footer rows together, with the footer's gap and rule:
-/// what the scrolling sections leave room for.
-const CHROME_H: f32 = CANVAS_CARD_HEAD_H + FOOTER_GAP + 1.0 + CANVAS_CARD_FOOT_H;
-/// The least the sections are given however short the window, so a few rows
-/// always show.
+/// The card's title row, tab strip and footer together, with the footer's gap
+/// and rule: what the scrolling body leaves room for.
+const CHROME_H: f32 = CANVAS_CARD_HEAD_H + STRIP_H + FOOTER_GAP + 1.0 + CANVAS_CARD_FOOT_H;
+/// The tab strip: a [`ui::segmented`] track around [`ui::SEGMENT_CELL_H`] cells.
+const STRIP_H: f32 = ui::CONTROL_H;
+/// The least the body is given however short the window, so a few rows always
+/// show.
 const MIN_BODY_H: f32 = 200.0;
-/// The *Default font* dropdown: room for a long family name beside its label.
-const DEFAULT_FONT_W: f32 = 200.0;
-/// The *Canvas* section's controls beside their labels: a colour row with its
-/// reset, or the thickness field, so their right and left edges line up. Narrower
-/// than [`DEFAULT_FONT_W`], whose labels are shorter.
-const PREF_CONTROL_W: f32 = 168.0;
+/// The value column every labelled row's control fills (a dropdown, a colour row
+/// with its reset, a field), so their left and right edges line up down a tab.
+const PREF_CONTROL_W: f32 = 220.0;
+
+/// The Settings card's tabs, in the strip's order. Which one shows is the run's,
+/// not the form's: switching keeps every edit, and it is never saved.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum SettingsTab {
+    #[default]
+    General,
+    Canvas,
+    Text,
+    Assets,
+    Assistant,
+}
+
+impl SettingsTab {
+    pub(crate) const ALL: [Self; 5] = [
+        Self::General,
+        Self::Canvas,
+        Self::Text,
+        Self::Assets,
+        Self::Assistant,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::General => "General",
+            Self::Canvas => "Canvas",
+            Self::Text => "Text",
+            Self::Assets => "Assets",
+            Self::Assistant => "Assistant",
+        }
+    }
+
+    fn index(self) -> usize {
+        Self::ALL.iter().position(|t| *t == self).unwrap_or(0)
+    }
+
+    /// The tab `step` along from this one, wrapping at either end.
+    fn step(self, step: isize) -> Self {
+        let n = Self::ALL.len() as isize;
+        Self::ALL[(self.index() as isize + step).rem_euclid(n) as usize]
+    }
+}
 
 /// Type size of a row's label — [`ui::SWITCH_ROW_LABEL_PT`], because half these
 /// rows *are* switch rows and a caption beside one has to match it.
@@ -157,6 +202,43 @@ impl Settings {
         self.theme
     }
 
+    /// Which tabs hold a row that differs from `saved`, in [`SettingsTab::ALL`]'s
+    /// order: the strip's marks. Destructured whole, so a new field cannot be left
+    /// out of every tab.
+    fn dirty_tabs(&self, saved: &Self) -> [bool; 5] {
+        let Self {
+            theme,
+            nudge,
+            canvas,
+            tree_guides,
+            collapse_groups_on_open,
+            resource_meter,
+            default_font,
+            spell_check,
+            web_fonts,
+            icon_sets,
+            photo_services,
+            photo_size,
+            keys,
+            assistant,
+        } = self;
+        [
+            *theme != saved.theme
+                || *tree_guides != saved.tree_guides
+                || *collapse_groups_on_open != saved.collapse_groups_on_open
+                || *resource_meter != saved.resource_meter,
+            *nudge != saved.nudge || *canvas != saved.canvas,
+            *default_font != saved.default_font
+                || *spell_check != saved.spell_check
+                || *web_fonts != saved.web_fonts,
+            *icon_sets != saved.icon_sets
+                || *photo_services != saved.photo_services
+                || *photo_size != saved.photo_size
+                || *keys != saved.keys,
+            *assistant != saved.assistant,
+        ]
+    }
+
     /// Write the form back. Returns whether the web-fonts switch moved, because
     /// that is the one row with a consequence beyond the file — see
     /// [`crate::fonts::FontService::set_web_fonts`].
@@ -212,20 +294,30 @@ impl OndinApp {
         .on_hover_text("Settings")
         .clicked()
         {
-            self.toggle_settings(ui.ctx());
+            self.toggle_settings(ui.ctx(), None);
         }
     }
 
-    /// Open the modal, or close it discarding whatever was typed into it.
+    /// Open the modal on `tab`, or on the last tab shown this run for `None`, or
+    /// close it discarding whatever was typed into it. A door into one tab
+    /// (`Some`) never closes it: an open card turns to that tab.
     ///
     /// Opening asks for the cache size once, not the row every frame (a `read_dir`
     /// per frame).
-    pub(crate) fn toggle_settings(&mut self, ctx: &egui::Context) {
+    pub(crate) fn toggle_settings(&mut self, ctx: &egui::Context, tab: Option<SettingsTab>) {
+        if let Some(tab) = tab {
+            self.settings_tab = tab;
+            if self.settings.is_some() {
+                return;
+            }
+        }
         // No scrub survives either way: there is nothing to wind back into.
         self.in_flight.settings_scrub = None;
         self.settings = match self.settings {
             Some(_) => None,
             None => {
+                // Every tab is measured afresh: its rows may have changed since.
+                ctx.data_mut(|d| d.remove::<[f32; 5]>(tab_heights_id()));
                 self.fonts.measure_cache(ctx);
                 let on = self.prefs.assets.photo_services.clone();
                 self.read_asset_keys(ctx, &on);
@@ -258,9 +350,18 @@ impl OndinApp {
             self.picker = None;
         }
 
+        // `Ctrl+Tab` and `Ctrl+Shift+Tab` step the tabs; the keymap, which has them
+        // for the document tabs, is silenced behind the modal.
+        let ctrl = egui::Modifiers::COMMAND;
+        if ctx.input_mut(|i| i.consume_key(ctrl | egui::Modifiers::SHIFT, egui::Key::Tab)) {
+            self.settings_tab = self.settings_tab.step(-1);
+        } else if ctx.input_mut(|i| i.consume_key(ctrl, egui::Key::Tab)) {
+            self.settings_tab = self.settings_tab.step(1);
+        }
+
         let mut decision = None;
         let modal = card("settings", ctx, |ui| {
-            ui.set_width(ui::menu_inner_w(CARD_W, PAD));
+            ui.set_width(ui::menu_inner_w(SETTINGS_W, PAD));
             // Zero, so every vertical gap is written out: an `add_space` is added to
             // `item_spacing.y` (see [`SECTION_AIR`]).
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -270,131 +371,60 @@ impl OndinApp {
                 decision = Some(Decision::Cancel);
             }
 
-            // The sections scroll between the title and the footer once the card
-            // would be taller than the window; no bar, as on the app's panels.
-            // ⚠️ The height is asked as a minimum: an `Area` hands a scroll area
-            // last frame's size, so a maximum alone never grows back. The minimum
-            // is the sections' own height as last measured, capped by the window.
+            // --- tabs --------------------------------------------------
+            // One form: a tab holding an unsaved edit wears a dot, so Save never
+            // surprises.
+            let dirty = draft.dirty_tabs(&saved);
+            let tab = self.settings_tab;
+            if let Some(i) = ui::segmented(
+                ui,
+                ui.available_width(),
+                ui::SEGMENT_CELL_H,
+                SettingsTab::ALL.len(),
+                tab.index(),
+                |p, i, rect, on| {
+                    ui::segment_label_marked(p, rect, SettingsTab::ALL[i].label(), on, dirty[i]);
+                },
+            ) {
+                self.settings_tab = SettingsTab::ALL[i];
+            }
+            let tab = self.settings_tab;
+
+            // The body is as tall as the tallest tab, measured as the card opens,
+            // so switching never resizes the card; capped by the window, it scrolls
+            // between the strip and the footer, with no bar. ⚠️ Asked as a minimum
+            // too: an `Area` hands a scroll area last frame's size, so a maximum
+            // alone never grows back.
+            let heights_id = tab_heights_id();
+            let mut heights = match ui.data(|d| d.get_temp::<[f32; 5]>(heights_id)) {
+                Some(h) => h,
+                None => self.measure_tabs(ui, &draft),
+            };
             let room = (ctx.content_rect().height() - 2.0 * CARD_EDGE - CHROME_H).max(MIN_BODY_H);
-            let body_id = egui::Id::new("settings-body-h");
-            let content = ui.data(|d| d.get_temp::<f32>(body_id)).unwrap_or(room);
+            let body_h = heights.iter().copied().fold(0.0, f32::max).min(room);
+            let before = draft.scrubbed();
             let body = egui::ScrollArea::vertical()
-                .max_height(room)
-                .min_scrolled_height(content.min(room))
-                .auto_shrink([false, true])
+                .id_salt(("settings-tab", tab.index()))
+                .max_height(body_h)
+                .min_scrolled_height(body_h)
+                .auto_shrink([false, false])
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 0.0;
-                    // --- appearance --------------------------------------------
-                    theme_section(ui, &mut draft.theme);
-                    ui.add_space(ROW_GAP);
-                    if ui::switch_row(ui, "Show resource meter", draft.resource_meter, SWITCH_H)
-                        .on_hover_text("CPU and memory in the top bar")
-                        .clicked()
-                    {
-                        draft.resource_meter = !draft.resource_meter;
-                    }
-
-                    // --- nudge -------------------------------------------------
-                    section(ui, "Nudge");
-                    // Before the fields: `value_field` applies this frame's drag delta inside
-                    // the call that reports `drag_started()`.
-                    let before = draft.scrubbed();
-                    let half = egui::vec2((ui.available_width() - COL_GAP) / 2.0, FIELD_H);
-                    let mut dragging = ui
-                        .horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = COL_GAP;
-                            let a = nudge_field(ui, half, "Step", &mut draft.nudge.small);
-                            let b = nudge_field(ui, half, "Shift", &mut draft.nudge.large);
-                            a || b
-                        })
-                        .inner;
-
-                    // --- canvas ------------------------------------------------
-                    section(ui, "Canvas");
-                    dragging |= self.canvas_rows(ui, &mut draft.canvas);
-                    // The cancel is answered before the snapshot is armed (as in
-                    // `panels::export`'s quality field): on the frame a gesture is called
-                    // off, nothing may re-arm it.
-                    if dragging
-                        && !self.gesture_cancelled
-                        && self.in_flight.settings_scrub.is_none()
-                    {
-                        self.in_flight.settings_scrub = Some(before);
-                    }
-
-                    // --- layers ------------------------------------------------
-                    section(ui, "Layers");
-                    if ui::switch_row(ui, "Show tree guides", draft.tree_guides, SWITCH_H)
-                        .on_hover_text(
-                            "Dashed lines from a frame or group down to the layers inside it",
-                        )
-                        .clicked()
-                    {
-                        draft.tree_guides = !draft.tree_guides;
-                    }
-                    ui.add_space(ROW_GAP);
-                    if ui::switch_row(
-                        ui,
-                        "Collapse groups on open",
-                        draft.collapse_groups_on_open,
-                        SWITCH_H,
-                    )
-                    .on_hover_text("Opening a document folds every group and frame in the tree")
-                    .clicked()
-                    {
-                        draft.collapse_groups_on_open = !draft.collapse_groups_on_open;
-                    }
-
-                    // --- text --------------------------------------------------
-                    section(ui, "Text");
-                    if let Some(family) = self.default_font_row(ui, &draft.default_font) {
-                        draft.default_font = family;
-                    }
-                    caption(
-                        ui,
-                        "New text layers start in this font, or in Inter where it is neither \
-                 installed nor downloadable.",
-                    );
-                    ui.add_space(ROW_GAP);
-                    if ui::switch_row(ui, "Check spelling", draft.spell_check, SWITCH_H)
-                        .on_hover_text(
-                            "Underline misspelled words while editing text, in each run's language",
-                        )
-                        .clicked()
-                    {
-                        draft.spell_check = !draft.spell_check;
-                    }
-
-                    // --- web fonts ---------------------------------------------
-                    section(ui, "Web fonts");
-                    if ui::switch_row(ui, "Load web fonts", draft.web_fonts, SWITCH_H).clicked() {
-                        draft.web_fonts = !draft.web_fonts;
-                    }
-                    // A caption rather than a tooltip: the label names a capability, and
-                    // "off" is chosen deliberately (metered connection, no CDN), so the
-                    // sentence must be read before flipping. "No *font* request" because
-                    // the update check is another network source with its own switch.
-                    caption(
-                        ui,
-                        "Off is the fonts this machine has installed, plus Inter. \
-                     Nothing is downloaded and no font request is made.",
-                    );
-                    ui.add_space(ROW_GAP);
-                    self.font_cache_row(ui);
-
-                    // --- assets ------------------------------------------------
-                    // After Web fonts: both are the app's reach to the network.
-                    section(ui, "Assets");
-                    self.asset_rows(ui, &mut draft);
-
-                    // --- assistant ---------------------------------------------
-                    section(ui, "Assistant");
-                    self.assistant_rows(ui, &mut draft.assistant);
+                    let dragging = self.tab_rows(ui, &mut draft, tab);
                     ui::keep_focus_in_view(ui);
+                    dragging
                 });
-            let measured = body.content_size.y;
-            ui.data_mut(|d| d.insert_temp(body_id, measured));
+            // The cancel is answered before the snapshot is armed (as in
+            // `panels::export`'s quality field): on the frame a gesture is called
+            // off, nothing may re-arm it.
+            if body.inner && !self.gesture_cancelled && self.in_flight.settings_scrub.is_none() {
+                self.in_flight.settings_scrub = Some(before);
+            }
+            // A tab that grew while open (a key field shown) grows the card once.
+            let grown = &mut heights[tab.index()];
+            *grown = grown.max(body.content_size.y);
+            ui.data_mut(|d| d.insert_temp(heights_id, heights));
 
             // --- footer ------------------------------------------------
             if let Some(d) = modal_footer(ui, "Save changes", draft != saved) {
@@ -437,29 +467,139 @@ impl OndinApp {
         }
     }
 
-    /// The *Canvas* section's rows: the wheel-zoom switch, the guide colour and thickness, the adaptive
+    /// Every tab's height as laid out now, each drawn once into an invisible child
+    /// that takes no room, on a copy of the form: what the body's height is taken
+    /// from as the card opens.
+    fn measure_tabs(&mut self, ui: &mut egui::Ui, draft: &Settings) -> [f32; 5] {
+        let mut out = [0.0; 5];
+        let rect =
+            egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), 10_000.0));
+        for (i, tab) in SettingsTab::ALL.into_iter().enumerate() {
+            let mut scratch = draft.clone();
+            let mut child = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(rect)
+                    .id_salt(("settings-measure", i))
+                    .layout(egui::Layout::top_down(egui::Align::Min))
+                    .sizing_pass()
+                    .invisible(),
+            );
+            child.spacing_mut().item_spacing.y = 0.0;
+            self.tab_rows(&mut child, &mut scratch, tab);
+            out[i] = child.min_rect().height();
+        }
+        out
+    }
+
+    /// One tab's rows, into `draft`. Returns whether a number is being scrubbed.
+    fn tab_rows(&mut self, ui: &mut egui::Ui, draft: &mut Settings, tab: SettingsTab) -> bool {
+        match tab {
+            SettingsTab::General => {
+                section(ui, "Layers");
+                if ui::switch_row(ui, "Show tree guides", draft.tree_guides, SWITCH_H)
+                    .on_hover_text(
+                        "Dashed lines from a frame or group down to the layers inside it",
+                    )
+                    .clicked()
+                {
+                    draft.tree_guides = !draft.tree_guides;
+                }
+                ui.add_space(ROW_GAP);
+                if ui::switch_row(
+                    ui,
+                    "Collapse groups on open",
+                    draft.collapse_groups_on_open,
+                    SWITCH_H,
+                )
+                .on_hover_text("Opening a document folds every group and frame in the tree")
+                .clicked()
+                {
+                    draft.collapse_groups_on_open = !draft.collapse_groups_on_open;
+                }
+                // After Layers, so its track never sits under the tab strip's.
+                theme_section(ui, &mut draft.theme);
+                ui.add_space(ROW_GAP);
+                if ui::switch_row(ui, "Show resource meter", draft.resource_meter, SWITCH_H)
+                    .on_hover_text("CPU and memory in the top bar")
+                    .clicked()
+                {
+                    draft.resource_meter = !draft.resource_meter;
+                }
+                false
+            }
+            SettingsTab::Canvas => {
+                section(ui, "Wheel");
+                wheel_rows(ui, &mut draft.canvas);
+                section(ui, "Nudge");
+                let half = egui::vec2((ui.available_width() - COL_GAP) / 2.0, FIELD_H);
+                let nudging = ui
+                    .horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = COL_GAP;
+                        let a = nudge_field(ui, half, "Step", &mut draft.nudge.small);
+                        let b = nudge_field(ui, half, "Shift", &mut draft.nudge.large);
+                        a || b
+                    })
+                    .inner;
+                section(ui, "Guides and grid");
+                let guides = self.guide_rows(ui, &mut draft.canvas);
+                nudging || guides
+            }
+            SettingsTab::Text => {
+                // No eyebrow: it would only repeat the tab's name.
+                ui.add_space(TITLE_GAP);
+                if let Some(family) = self.default_font_row(ui, &draft.default_font) {
+                    draft.default_font = family;
+                }
+                caption(
+                    ui,
+                    "New text layers start in this font, or in Inter where it is neither \
+                     installed nor downloadable.",
+                );
+                ui.add_space(ROW_GAP);
+                if ui::switch_row(ui, "Check spelling", draft.spell_check, SWITCH_H)
+                    .on_hover_text(
+                        "Underline misspelled words while editing text, in each run's language",
+                    )
+                    .clicked()
+                {
+                    draft.spell_check = !draft.spell_check;
+                }
+                section(ui, "Web fonts");
+                if ui::switch_row(ui, "Load web fonts", draft.web_fonts, SWITCH_H).clicked() {
+                    draft.web_fonts = !draft.web_fonts;
+                }
+                // A caption rather than a tooltip: the label names a capability, and
+                // "off" is chosen deliberately (metered connection, no CDN), so the
+                // sentence must be read before flipping. "No *font* request" because
+                // the update check is another network source with its own switch.
+                caption(
+                    ui,
+                    "Off is the fonts this machine has installed, plus Inter. \
+                     Nothing is downloaded and no font request is made.",
+                );
+                ui.add_space(ROW_GAP);
+                self.font_cache_row(ui);
+                false
+            }
+            SettingsTab::Assets => {
+                ui.add_space(TITLE_GAP);
+                self.asset_rows(ui, draft);
+                false
+            }
+            SettingsTab::Assistant => {
+                ui.add_space(TITLE_GAP);
+                self.assistant_rows(ui, &mut draft.assistant);
+                false
+            }
+        }
+    }
+
+    /// The *Guides and grid* rows: the guide colour and thickness, the adaptive
     /// grid switch, and the grid's own colour, dimmed while adaptive is on. The
     /// colours go through [`PaintSlot::Pref`]; the rest into `canvas`. Returns whether
     /// the thickness is being scrubbed.
-    fn canvas_rows(&mut self, ui: &mut egui::Ui, canvas: &mut CanvasPrefs) -> bool {
+    fn guide_rows(&mut self, ui: &mut egui::Ui, canvas: &mut CanvasPrefs) -> bool {
         let defaults = CanvasPrefs::default();
-        if ui::switch_row(
-            ui,
-            "Zoom with the scroll wheel",
-            canvas.wheel_zooms,
-            SWITCH_H,
-        )
-        .on_hover_text("A mouse wheel zooms at the cursor; Ctrl or Alt with it pans")
-        .clicked()
-        {
-            canvas.wheel_zooms = !canvas.wheel_zooms;
-        }
-        caption(
-            ui,
-            "Ctrl or Alt with the wheel pans instead. A touchpad's two-finger scroll \
-             still pans.",
-        );
-        ui.add_space(ROW_GAP);
         self.pref_colour_row(
             ui,
             PrefColour::Guide,
@@ -629,7 +769,7 @@ impl OndinApp {
         });
     }
 
-    /// The *Assets* section: a switch per icon set and photo service, each noted
+    /// The *Assets* tab: a switch per icon set and photo service, each noted
     /// with its licence, the key field under a keyed service that is on, the photo
     /// size, and the cache with *Clear*.
     fn asset_rows(&mut self, ui: &mut egui::Ui, draft: &mut Settings) {
@@ -640,10 +780,11 @@ impl OndinApp {
             "Icon sets download once and are kept. Photos are searched online. \
              Nothing is downloaded until a set or service is on.",
         );
-        ui.add_space(ROW_GAP);
-        sub_heading(ui, "Icon sets");
-        for spec in SETS {
-            ui.add_space(ROW_GAP);
+        section(ui, "Icon sets");
+        for (i, spec) in SETS.iter().enumerate() {
+            if i > 0 {
+                ui.add_space(ROW_GAP);
+            }
             let on = draft.icon_sets.iter().any(|k| k == spec.key);
             if ui::switch_row_noted(ui, spec.name, &spec.note(), on, SWITCH_H).clicked() {
                 toggle_key(&mut draft.icon_sets, spec.key);
@@ -660,14 +801,15 @@ impl OndinApp {
                 toggle_key(&mut draft.icon_sets, &key);
             }
         }
-        ui.add_space(ROW_GAP * 2.0);
-        sub_heading(ui, "Photos");
+        section(ui, "Photos");
         // A keyed service just switched on shows its field: the keys are read now.
         let ctx = ui.ctx().clone();
         self.read_asset_keys(&ctx, &draft.photo_services);
         let keys_read = self.asset_keys.is_some();
-        for svc in SERVICES {
-            ui.add_space(ROW_GAP);
+        for (i, svc) in SERVICES.iter().enumerate() {
+            if i > 0 {
+                ui.add_space(ROW_GAP);
+            }
             let on = draft.photo_services.iter().any(|k| k == svc.key);
             if ui::switch_row_noted(ui, svc.name, svc.note, on, SWITCH_H).clicked() {
                 toggle_key(&mut draft.photo_services, svc.key);
@@ -863,7 +1005,7 @@ impl OndinApp {
                 let (picked, combo) = self.family_dropdown(
                     ui,
                     "settings-default-font",
-                    egui::vec2(DEFAULT_FONT_W, FIELD_H),
+                    egui::vec2(PREF_CONTROL_W, FIELD_H),
                     head,
                     current,
                 );
@@ -898,6 +1040,31 @@ fn cache_row(bytes: Option<u64>) -> (String, bool) {
         Some(0) => ("Nothing in the web font cache".to_owned(), false),
         Some(n) => (format!("{} of web font cache", human_bytes(n)), true),
     }
+}
+
+/// The *Wheel* rows: the wheel-zoom switch and its caption.
+fn wheel_rows(ui: &mut egui::Ui, canvas: &mut CanvasPrefs) {
+    if ui::switch_row(
+        ui,
+        "Zoom with the scroll wheel",
+        canvas.wheel_zooms,
+        SWITCH_H,
+    )
+    .on_hover_text("A mouse wheel zooms at the cursor; Ctrl or Alt with it pans")
+    .clicked()
+    {
+        canvas.wheel_zooms = !canvas.wheel_zooms;
+    }
+    caption(
+        ui,
+        "Ctrl or Alt with the wheel pans instead. A touchpad's two-finger scroll \
+         still pans.",
+    );
+}
+
+/// Where the open Settings card keeps each tab's measured height.
+fn tab_heights_id() -> egui::Id {
+    egui::Id::new("settings-tab-heights")
 }
 
 /// [`card_modal`] shown, holding `Tab` among its own controls ([`ui::hold_tab`]).
@@ -1311,8 +1478,8 @@ pub(crate) enum Decision {
     Cancel,
 }
 
-/// The *Appearance* section, first in both screens' Settings: a System / Dark /
-/// Light segmented control writing `theme` in the modal's draft.
+/// The *Appearance* section, in both screens' Settings: a System / Dark / Light
+/// segmented control writing `theme` in the modal's draft.
 pub(crate) fn theme_section(ui: &mut egui::Ui, theme: &mut ThemePref) {
     const THEMES: [(ThemePref, &str); 3] = [
         (ThemePref::System, "System"),
@@ -1362,7 +1529,7 @@ pub(crate) fn section(ui: &mut egui::Ui, label: &str) {
 }
 
 impl OndinApp {
-    /// The *Assistant* section: the agent, its program, model and effort, the
+    /// The *Assistant* tab: the agent, its program, model and effort, the
     /// default access, and instructions added to every system prompt. With
     /// *Off*, the rows below the agent are disabled with that reason.
     fn assistant_rows(&mut self, ui: &mut egui::Ui, a: &mut crate::assistant::AssistantPrefs) {
@@ -1514,9 +1681,7 @@ impl OndinApp {
                     a.access = Level::ALL[i].key().to_owned();
                 }
             });
-            ui.add_space(ROW_GAP);
-            sub_heading(ui, "Instructions");
-            ui.add_space(4.0);
+            section(ui, "Instructions");
             // Held at its rows, scrolling past them: the modal keeps its size.
             let mut area = ui::TextArea::new("Added to every question, after Ondin's own", 4);
             area.max_rows = 4;
@@ -1599,16 +1764,6 @@ fn effort_label(word: &str) -> String {
     let mut c = word.chars();
     c.next()
         .map_or_else(String::new, |f| f.to_uppercase().chain(c).collect())
-}
-
-/// A group's name inside a section (*Icon sets*, *Photos*): a row's label size,
-/// in the strong ink, above the rows it heads.
-fn sub_heading(ui: &mut egui::Ui, text: &str) {
-    ui.label(
-        egui::RichText::new(text)
-            .size(LABEL_PT)
-            .color(theme::text::strong()),
-    );
 }
 
 /// Add `key` to `on`, or take it out if it is there.
@@ -1817,7 +1972,7 @@ mod tests {
     fn the_title_and_footer_rows_are_a_canvas_cards() {
         let ctx = egui::Context::default();
         let mut app = OndinApp::headless(&ctx);
-        app.toggle_settings(&ctx);
+        app.toggle_settings(&ctx, None);
         let runs = galleys(&mut app, &ctx);
         // The frame as painted: `Shape::Vec([shadow, rect])` for a shadowed one.
         fn rects(shape: &egui::Shape, out: &mut Vec<egui::Rect>) {
@@ -1836,7 +1991,7 @@ mod tests {
         full.shapes.iter().for_each(|cs| rects(&cs.shape, &mut all));
         let card = all
             .into_iter()
-            .filter(|r| (r.width() - CARD_W).abs() <= 3.0)
+            .filter(|r| (r.width() - SETTINGS_W).abs() <= 3.0)
             .max_by(|a, b| a.height().total_cmp(&b.height()))
             .expect("the card's frame");
         let mid = |t: &str| {
@@ -1857,17 +2012,17 @@ mod tests {
         );
     }
 
-    /// On a window shorter than the card, the sections scroll and the title and
+    /// On a window shorter than the card, the body scrolls and the title and
     /// the footer stay on screen; on a tall one the whole card shows, its last
     /// row included.
-    /// flip: drop `min_scrolled_height` in `settings_ui` → the tall window loses
-    /// the Assets rows (the area keeps its first, scrolled height).
+    /// flip: `settings_ui`'s body height not capped by the window's room → fails
+    /// at "the title shows" on the short window.
     #[test]
     fn the_sections_scroll_and_the_footer_stays_on_screen() {
         let ctx = egui::Context::default();
         let mut app = OndinApp::headless(&ctx);
-        app.toggle_settings(&ctx);
-        let short = egui::vec2(1200.0, 700.0);
+        app.toggle_settings(&ctx, Some(SettingsTab::Assets));
+        let short = egui::vec2(1200.0, 480.0);
         let runs = galleys_on(&mut app, &ctx, short);
         let y_of = |runs: &[(egui::Pos2, egui::Vec2, String)], t: &str| {
             runs.iter()
@@ -1882,60 +2037,68 @@ mod tests {
             short.y
         );
         // A row scrolled out still paints, under the clip: it lies past the footer.
-        let (row, _) = y_of(&runs, "Phosphor").expect("the row is laid out");
+        let (row, _) = y_of(&runs, "Openverse").expect("the row is laid out");
         assert!(
             row > footer,
-            "the Assets rows are scrolled below the footer"
+            "the Assets tab's last rows are scrolled below the footer"
         );
 
         let runs = galleys_on(&mut app, &ctx, SCREEN);
         let (footer, _) = y_of(&runs, "Save changes").expect("the footer shows");
-        let (row, _) = y_of(&runs, "Phosphor").expect("the row is laid out");
+        let (row, _) = y_of(&runs, "Openverse").expect("the row is laid out");
         assert!(row < footer, "a tall window shows the whole card");
     }
 
-    /// The column is what `CARD_W` leaves, no row runs past it, and the caption
-    /// stays within two lines.
+    /// The column is what `SETTINGS_W` leaves, no row on any tab runs past it,
+    /// and the caption stays within two lines.
     ///
     /// The overflow loop covers only the `painter.text` runs (switch labels, button
     /// words), since `ui.label` wraps; the caption is asserted on its height.
     ///
-    /// flip: `CARD_W` at 300 → fails the column assertion; one more clause on the
-    /// caption → fails the caption height at 39pt.
+    /// flip: `SETTINGS_W` at 300 → fails the column assertion; one more clause on
+    /// the caption → fails the caption height.
     #[test]
     fn every_row_fits_the_cards_own_column() {
         let ctx = egui::Context::default();
         let mut app = OndinApp::headless(&ctx);
-        app.toggle_settings(&ctx);
-        let runs = galleys(&mut app, &ctx);
-
-        assert!(
-            runs.iter().any(|(_, _, t)| t == "Settings"),
-            "the fixture: the modal is open and painting (got {} runs)",
-            runs.len()
-        );
-        let left = runs
-            .iter()
-            .map(|(p, _, _)| p.x)
-            .fold(f32::INFINITY, f32::min);
-        let column = ui::menu_inner_w(CARD_W, PAD);
+        app.toggle_settings(&ctx, None);
+        let column = ui::menu_inner_w(SETTINGS_W, PAD);
         assert_eq!(
-            column, 346.0,
-            "376 across, less 14 of padding and a hairline"
+            column, 450.0,
+            "480 across, less 14 of padding and a hairline"
         );
-
-        for (pos, size, text) in &runs {
-            let over = pos.x + size.x - (left + column);
+        let mut widest = 0.0_f32;
+        let mut caption = None;
+        for tab in SettingsTab::ALL {
+            app.settings_tab = tab;
+            let runs = galleys(&mut app, &ctx);
             assert!(
-                over <= 0.5,
-                "{text:?} runs {over:.1}pt past the card's own column"
+                runs.iter().any(|(_, _, t)| t == "Settings"),
+                "the fixture: the modal is open and painting (got {} runs)",
+                runs.len()
             );
+            let left = runs
+                .iter()
+                .map(|(p, _, _)| p.x)
+                .fold(f32::INFINITY, f32::min);
+            for (pos, size, text) in &runs {
+                let over = pos.x + size.x - (left + column);
+                assert!(
+                    over <= 0.5,
+                    "{tab:?}: {text:?} runs {over:.1}pt past the card's own column"
+                );
+            }
+            widest = runs
+                .iter()
+                .map(|(p, s, _)| p.x + s.x - left)
+                .fold(widest, f32::max);
+            caption = caption.or_else(|| {
+                runs.iter()
+                    .find(|(_, _, t)| t.starts_with("Off is the fonts"))
+                    .map(|(_, s, _)| s.y)
+            });
         }
         // The column is used, or a card twice as wide would pass the loop.
-        let widest = runs
-            .iter()
-            .map(|(p, s, _)| p.x + s.x - left)
-            .fold(0.0_f32, f32::max);
         assert!(
             widest > column - 40.0,
             "the widest row is {widest:.1} in a {column} column — the card is not the \
@@ -1943,11 +2106,7 @@ mod tests {
         );
 
         // The caption as a height: one line at `CAPTION_PT` is 13pt, so 26 is two.
-        let caption = runs
-            .iter()
-            .find(|(_, _, t)| t.starts_with("Off is the fonts"))
-            .map(|(_, s, _)| s.y)
-            .expect("the web-fonts caption");
+        let caption = caption.expect("the web-fonts caption");
         assert!(
             caption <= 27.0,
             "the caption wrapped to {caption:.0}pt, which is more than the two lines \
@@ -1965,8 +2124,10 @@ mod tests {
     fn a_row_and_the_button_beside_it_share_one_centre() {
         let ctx = egui::Context::default();
         let mut app = OndinApp::headless(&ctx);
-        app.toggle_settings(&ctx);
-        let runs = galleys(&mut app, &ctx);
+        app.toggle_settings(&ctx, Some(SettingsTab::Text));
+        let mut runs = galleys(&mut app, &ctx);
+        app.settings_tab = SettingsTab::Canvas;
+        runs.extend(galleys(&mut app, &ctx));
         let mid = |label: &str| {
             runs.iter()
                 .find(|(_, _, t)| t == label)
@@ -1974,7 +2135,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("no run for {label:?}"))
         };
         for (a, b) in [
-            // Cache row, footer, a nudge field.
+            // Cache row (Text), footer, a nudge field (Canvas).
             ("Counting the web font cache…", "Clear"),
             ("Cancel", "Save changes"),
             ("Step", "px"),
@@ -1998,7 +2159,7 @@ mod tests {
     fn save_changes_is_dim_until_the_form_is_edited() {
         let ctx = egui::Context::default();
         let mut app = OndinApp::headless(&ctx);
-        app.toggle_settings(&ctx);
+        app.toggle_settings(&ctx, None);
         let clean = button_grounds(&mut app, &ctx, &["Save changes", "Cancel"]);
         assert_eq!(
             clean[0], clean[1],
@@ -2045,23 +2206,34 @@ mod tests {
         out
     }
 
-    /// A section header has the same air above it as below it.
+    /// A section header has the same air above it as below it, the first on a
+    /// tab included: the tab strip stands above that one.
     ///
     /// Measured on ink, not layout boxes: a 22pt `ui::switch_row` centres a 16pt
     /// track, so 3pt of row padding sits between header and ink; 4pt of slack
-    /// covers that. The first header is exempt because the card's title row
-    /// stands above it, and gets its own assertion.
+    /// covers that.
     ///
     /// flip: a 15pt `add_space` over an 11pt `item_spacing`, with the eyebrow row
-    /// left to take `interact_size.y` → the headers fail (*Layers* 32 above
-    /// against 20 below).
+    /// left to take `interact_size.y` → the headers fail.
     #[test]
     fn a_section_header_has_equal_air_above_and_below_it() {
         let ctx = egui::Context::default();
         let mut app = OndinApp::headless(&ctx);
-        app.toggle_settings(&ctx);
-        let runs = galleys(&mut app, &ctx);
-        let bands = ink(&mut app, &ctx);
+        app.toggle_settings(&ctx, None);
+        for (tab, headers) in [
+            (SettingsTab::General, &["LAYERS", "APPEARANCE"][..]),
+            (SettingsTab::Canvas, &["WHEEL", "NUDGE", "GUIDES AND GRID"]),
+            (SettingsTab::Text, &["WEB FONTS"]),
+        ] {
+            app.settings_tab = tab;
+            header_air(&mut app, &ctx, headers);
+        }
+    }
+
+    /// `a_section_header_has_equal_air_above_and_below_it` on the tab shown.
+    fn header_air(app: &mut OndinApp, ctx: &egui::Context, headers: &[&str]) {
+        let runs = galleys(app, ctx);
+        let bands = ink(app, ctx);
         // Nearest ink ending before the header and starting after it; the header's
         // own galley is in `bands`, hence the strict comparisons.
         let air = |header: &str| -> (f32, f32) {
@@ -2084,21 +2256,13 @@ mod tests {
             )
         };
 
-        for header in ["NUDGE", "LAYERS", "WEB FONTS"] {
+        for header in headers {
             let (above, below) = air(header);
             assert!(
                 (above - below).abs() <= 4.0,
                 "{header}: {above:.1}pt of air above the header and {below:.1}pt below it"
             );
         }
-
-        // The title's standoff is the larger one.
-        let (title_gap, first_row) = air("APPEARANCE");
-        assert!(
-            title_gap > first_row + 6.0,
-            "the title stands off by {title_gap:.1}pt against the header's own \
-             {first_row:.1}pt — too close to tell apart"
-        );
     }
 
     /// Both nudge fields hold whole pixels however the number got there. The
@@ -2112,7 +2276,7 @@ mod tests {
     fn the_nudge_fields_hold_whole_pixels() {
         let ctx = egui::Context::default();
         let mut app = OndinApp::headless(&ctx);
-        app.toggle_settings(&ctx);
+        app.toggle_settings(&ctx, Some(SettingsTab::Canvas));
         app.settings = Some(Settings {
             nudge: NudgeStep {
                 small: 0.4,
@@ -2144,7 +2308,7 @@ mod tests {
     fn a_right_click_winds_a_scrubbed_nudge_back() {
         let ctx = egui::Context::default();
         let mut app = OndinApp::headless(&ctx);
-        app.toggle_settings(&ctx);
+        app.toggle_settings(&ctx, None);
         let before = app.settings.as_ref().expect("open").nudge;
 
         // The state a live scrub leaves, set directly: the cancel is under test,
@@ -2409,7 +2573,7 @@ mod tests {
     ) -> (OndinApp, egui::Rect, egui::Rect) {
         theme::install(ctx);
         let mut app = OndinApp::headless(ctx);
-        app.toggle_settings(ctx);
+        app.toggle_settings(ctx, Some(SettingsTab::Canvas));
         for _ in 0..5 {
             frame(ctx, &mut app, Vec::new());
         }
@@ -2560,7 +2724,7 @@ mod tests {
             let key = ("pexels".to_string(), "k".repeat(80));
             app.asset_keys = Some([key].into_iter().collect());
             app.prefs.assets.photo_services = services.iter().map(|s| s.to_string()).collect();
-            app.toggle_settings(&ctx);
+            app.toggle_settings(&ctx, Some(SettingsTab::Assets));
             let runs = galleys(&mut app, &ctx);
             let fields = runs
                 .iter()
@@ -2579,27 +2743,134 @@ mod tests {
         assert_eq!(on, off, "key fields fit");
     }
 
-    /// An icon set's long note stops short of its switch, cut with an ellipsis.
-    /// flip: paint `switch_row_inner`'s note uncut → fails at "clear of the switch".
+    /// The card is one height whichever tab shows, the tallest tab's.
+    /// flip: `settings_ui` taking the body's height from the shown tab alone →
+    /// fails at the General tab.
     #[test]
-    fn a_long_switch_note_stops_short_of_the_switch() {
+    fn every_tab_shows_in_one_card() {
         let ctx = egui::Context::default();
         let mut app = OndinApp::headless(&ctx);
-        app.toggle_settings(&ctx);
-        let runs = galleys(&mut app, &ctx);
-        let left = runs
-            .iter()
-            .map(|(p, _, _)| p.x)
-            .fold(f32::INFINITY, f32::min);
-        let switch = left + ui::menu_inner_w(CARD_W, PAD) - ui::SWITCH_SIZE.x;
-        let (pos, size, _) = runs
-            .iter()
-            .find(|(_, _, t)| t.starts_with("CC BY 4.0 · "))
-            .expect("Font Awesome's note is drawn");
+        app.toggle_settings(&ctx, None);
+        let mut heights = Vec::new();
+        for tab in SettingsTab::ALL {
+            app.settings_tab = tab;
+            let _ = galleys(&mut app, &ctx);
+            let card = ctx.memory(|m| m.area_rect(egui::Id::new("settings")));
+            heights.push((tab, card.expect("the card is drawn").height()));
+        }
+        let first = heights[0].1;
         assert!(
-            pos.x + size.x < switch,
-            "clear of the switch: ends at {:.1}, switch at {switch:.1}",
-            pos.x + size.x
+            heights.iter().all(|(_, h)| (h - first).abs() < 0.5),
+            "{heights:?}"
         );
+    }
+
+    /// A tab holding an edit is marked, and only that tab; switching tabs keeps
+    /// the edit and its mark, and putting the value back takes the mark off.
+    /// flip: `dirty_tabs` comparing `canvas` on the General tab → fails at the
+    /// first assertion.
+    #[test]
+    fn a_tab_holding_an_edit_wears_the_dot() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        app.toggle_settings(&ctx, Some(SettingsTab::Canvas));
+        let saved = before_form(&app);
+        let mut edited = saved.clone();
+        edited.canvas.guide_thickness += 1;
+        assert_eq!(
+            edited.dirty_tabs(&saved),
+            [false, true, false, false, false]
+        );
+        app.settings = Some(edited.clone());
+        // The strip paints the dot: a circle of its radius.
+        let dots = |app: &mut OndinApp| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SCREEN)),
+                ..Default::default()
+            };
+            let mut full = ctx.run_ui(input.clone(), |ui| app.settings_ui(ui.ctx()));
+            for _ in 0..2 {
+                full = ctx.run_ui(input.clone(), |ui| app.settings_ui(ui.ctx()));
+            }
+            full.shapes
+                .iter()
+                .filter(|c| {
+                    matches!(&c.shape, egui::Shape::Circle(s) if s.radius == ui::SEGMENT_MARK_R)
+                })
+                .count()
+        };
+        assert_eq!(dots(&mut app), 1, "one tab is marked");
+        app.settings_tab = SettingsTab::Assistant;
+        let _ = galleys(&mut app, &ctx);
+        assert_eq!(
+            app.settings.as_ref().map(|s| s.canvas.guide_thickness),
+            Some(edited.canvas.guide_thickness),
+            "switching keeps the edit"
+        );
+        assert_eq!(dots(&mut app), 1, "and its mark");
+        app.settings = Some(saved);
+        assert_eq!(dots(&mut app), 0, "the value put back, the mark goes");
+    }
+
+    /// `Ctrl+Tab` steps to the next tab and `Ctrl+Shift+Tab` back, wrapping.
+    /// flip: consume `Ctrl+Tab` before `Ctrl+Shift+Tab` in `settings_ui` → the
+    /// backward press steps forward and fails at "wraps back".
+    #[test]
+    fn ctrl_tab_steps_the_tabs() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        app.toggle_settings(&ctx, None);
+        let key = |modifiers| egui::Event::Key {
+            key: egui::Key::Tab,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        let run = |app: &mut OndinApp, events| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SCREEN)),
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| app.settings_ui(ui.ctx()));
+        };
+        run(&mut app, vec![key(egui::Modifiers::COMMAND)]);
+        assert_eq!(app.settings_tab, SettingsTab::Canvas);
+        run(
+            &mut app,
+            vec![key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT)],
+        );
+        run(
+            &mut app,
+            vec![key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT)],
+        );
+        assert_eq!(app.settings_tab, SettingsTab::Assistant, "wraps back");
+    }
+
+    /// A door opens its own tab, and the plain opener the last tab shown; a door
+    /// into an open card turns it to that tab and leaves it open.
+    /// flip: `toggle_settings` ignoring `tab` → fails at the door's tab.
+    #[test]
+    fn a_door_opens_its_tab() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        app.toggle_settings(&ctx, Some(SettingsTab::Assets));
+        assert!(app.settings.is_some());
+        assert_eq!(app.settings_tab, SettingsTab::Assets, "the door's tab");
+        app.toggle_settings(&ctx, None);
+        assert!(
+            app.settings.is_none(),
+            "the plain opener closes an open card"
+        );
+        app.toggle_settings(&ctx, None);
+        assert_eq!(
+            app.settings_tab,
+            SettingsTab::Assets,
+            "and opens on the last tab"
+        );
+        app.toggle_settings(&ctx, Some(SettingsTab::Assistant));
+        assert!(app.settings.is_some(), "a door never closes it");
+        assert_eq!(app.settings_tab, SettingsTab::Assistant);
     }
 }

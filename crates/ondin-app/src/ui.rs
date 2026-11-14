@@ -6641,6 +6641,43 @@ pub fn segment_label(painter: &egui::Painter, rect: egui::Rect, text: &str, on: 
     );
 }
 
+/// A [`segment_label`] followed, when `marked`, by a [`SEGMENT_MARK_R`] dot in
+/// `accent_400`, the pair centred together: a tab holding edits not yet saved
+/// (Settings' strip). Not the override mark, which is neutral and carries a reset;
+/// this one carries nothing.
+pub fn segment_label_marked(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    text: &str,
+    on: bool,
+    marked: bool,
+) {
+    if !marked {
+        return segment_label(painter, rect, text, on);
+    }
+    let ink = if on {
+        color::text()
+    } else {
+        theme::text::dim()
+    };
+    let galley = painter.layout_no_wrap(
+        text.to_owned(),
+        egui::FontId::proportional(SEGMENT_LABEL_PT),
+        ink,
+    );
+    let mark_w = SEGMENT_MARK_GAP + 2.0 * SEGMENT_MARK_R;
+    let left = rect.center().x - (galley.size().x + mark_w) / 2.0;
+    let at = egui::pos2(left, rect.center().y - galley.size().y / 2.0);
+    let right = left + galley.size().x;
+    painter.galley(at, galley, ink);
+    let dot = egui::pos2(right + SEGMENT_MARK_GAP + SEGMENT_MARK_R, rect.center().y);
+    painter.circle_filled(dot, SEGMENT_MARK_R, color::accent_400());
+}
+
+/// The radius of [`segment_label_marked`]'s dot, and its gap after the label.
+pub const SEGMENT_MARK_R: f32 = 2.5;
+const SEGMENT_MARK_GAP: f32 = 5.0;
+
 /// A [`segment_label`] for a cell that is present but unavailable — see
 /// [`segmented_enabled`]. [`theme::text::disabled()`], not the resting tier, or the
 /// cell would look merely unselected.
@@ -9223,6 +9260,41 @@ mod tests {
         assert!(!list(&ctx).open, "Escape closes the list");
         assert_eq!(text, "sonnet", "and keeps the text");
         assert_eq!(ctx.memory(|m| m.focused()), field, "and the focus");
+    }
+
+    /// A note too long for its row stops short of the switch, cut with an
+    /// ellipsis.
+    /// flip: paint `switch_row_inner`'s note uncut → fails at "clear of the switch".
+    #[test]
+    fn a_long_switch_note_stops_short_of_the_switch() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let note = "CC BY 4.0 · each icon keeps its credit";
+        let mut row = egui::Rect::NOTHING;
+        let mut out = None;
+        for _ in 0..2 {
+            out = Some(ctx.run_ui(Default::default(), |ui| {
+                ui.set_width(220.0);
+                row = switch_row_noted(ui, "Font Awesome Free", note, false, 22.0).rect;
+            }));
+        }
+        let (pos, size) = out
+            .expect("ran")
+            .shapes
+            .iter()
+            .find_map(|c| match &c.shape {
+                egui::Shape::Text(t) if t.galley.text().starts_with("CC BY") => {
+                    Some((t.pos, t.galley.size()))
+                }
+                _ => None,
+            })
+            .expect("the note is drawn");
+        let switch = row.right() - SWITCH_SIZE.x;
+        assert!(
+            pos.x + size.x < switch,
+            "clear of the switch: ends at {:.1}, switch at {switch:.1}",
+            pos.x + size.x
+        );
     }
 
     /// The filled lock and hexagon land centred on the point they are given, the

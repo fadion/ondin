@@ -762,7 +762,7 @@ impl OndinApp {
             }
             Some(Act::Settings) => {
                 self.asset_panel = None;
-                self.toggle_settings(ctx);
+                self.toggle_settings(ctx, Some(crate::settings::SettingsTab::Assets));
             }
             Some(Act::RetrySets) => {
                 for s in &on_sets {

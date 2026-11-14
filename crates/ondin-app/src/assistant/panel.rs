@@ -250,10 +250,8 @@ impl OndinApp {
             Act::Regenerate => self.assistant_regenerate(),
             Act::OpenSettings => {
                 self.assistant.open = false;
-                if self.settings.is_none() {
-                    let ctx = self.egui_ctx.clone();
-                    self.toggle_settings(&ctx);
-                }
+                let ctx = self.egui_ctx.clone();
+                self.toggle_settings(&ctx, Some(crate::settings::SettingsTab::Assistant));
             }
             Act::Close => self.assistant.open = false,
             Act::Width(w) => self.prefs.assistant.width = w,

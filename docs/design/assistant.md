@@ -267,8 +267,9 @@ against an eager model, not a boundary against a hostile one. The seal's sentenc
 
 ## 5. Settings
 
-An **Assistant** section in Settings, after *Assets* (`app-canvas-chrome.md`, *Settings*), staged
-and written on *Save changes* as the rest is. Stored in prefs (`AssistantPrefs`), per machine; none
+An **Assistant** tab in Settings, after *Assets* (`app-canvas-chrome.md`, *Settings*), staged
+and written on *Save changes* as the rest is. A caption opens it; the rows follow, then an
+**Instructions** eyebrow over the text area. Stored in prefs (`AssistantPrefs`), per machine; none
 of it is a secret.
 
 - **Agent** — a dropdown, *Off* first. A new install starts off. An unknown saved key loads as off

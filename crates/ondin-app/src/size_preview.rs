@@ -15,6 +15,8 @@ use crate::ui;
 use ondin_core::kurbo::Rect;
 use ondin_core::{Document, NodeId, Operation, Resolved, Transaction};
 use ondin_render::{ImageStore, RenderOverrides, VelloCpuRenderer, Viewport};
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 /// The sizes the ⋯ menu offers, smallest first.
 pub(crate) const SIZE_CHOICES: [u32; 10] = [12, 16, 18, 20, 24, 28, 32, 40, 48, 64];
@@ -83,8 +85,11 @@ pub(crate) struct SizePreview {
     /// shape*, *Flatten*, *Convert to path*) selects what it made in that place,
     /// alone, and the pin moves to it. A sibling that slid into the place, or one
     /// of several layers selected (*Ungroup*'s children), is no heir. Kept only
-    /// while the card shows.
-    slots: Vec<(NodeId, (NodeId, usize), Vec<NodeId>)>,
+    /// while the card shows, and taken again only when the revision or the pin
+    /// moves, since a pin may hold thousands of layers.
+    slots: HashMap<NodeId, Slot>,
+    /// The revision and pin `slots` were taken at.
+    slots_at: Option<(u64, Vec<NodeId>)>,
     /// Whether the ⋯ menu is open.
     menu: bool,
     job: Option<Job<Landed>>,
@@ -112,6 +117,13 @@ impl SizePreview {
     pub(crate) fn pin_selection(&mut self, ids: &[NodeId]) {
         self.pinned = Some(ids.to_vec());
     }
+}
+
+/// Where a pinned layer sat: its parent and index, and every child of that
+/// parent then by index, shared by the parent's pinned children.
+struct Slot {
+    place: (NodeId, usize),
+    siblings: Arc<HashMap<NodeId, usize>>,
 }
 
 /// A tile's column width for size `n`.
@@ -240,10 +252,9 @@ impl OndinApp {
                 let heir = match selected {
                     [one] => sp
                         .slots
-                        .iter()
-                        .find(|(was, _, _)| was == id)
-                        .filter(|(_, slot, siblings)| {
-                            slot_of(doc, *one) == Some(*slot) && !siblings.contains(one)
+                        .get(id)
+                        .filter(|s| {
+                            slot_of(doc, *one) == Some(s.place) && !s.siblings.contains_key(one)
                         })
                         .map(|_| one),
                     _ => None,
@@ -252,26 +263,34 @@ impl OndinApp {
                     *id = *heir;
                 }
             }
-            let mut kept: Vec<NodeId> = Vec::with_capacity(pinned.len());
-            pinned.retain(|id| {
-                let keep = doc.get(*id).is_some() && !kept.contains(id);
-                kept.push(*id);
-                keep
-            });
+            let mut kept = HashSet::with_capacity(pinned.len());
+            pinned.retain(|id| doc.get(*id).is_some() && kept.insert(*id));
             if pinned.is_empty() {
                 sp.pinned = None;
             }
         }
-        sp.slots = sp
-            .pinned
-            .iter()
-            .flatten()
-            .filter_map(|id| {
-                let slot = slot_of(doc, *id)?;
-                let siblings = doc.get(slot.0)?.children().to_vec();
-                Some((*id, slot, siblings))
-            })
-            .collect();
+        let rev = self.session.revision();
+        let pin = sp.pinned.clone().unwrap_or_default();
+        if sp.slots_at.as_ref() != Some(&(rev, pin.clone())) {
+            // One index of children per parent, shared by its pinned children.
+            let mut parents: HashMap<NodeId, Arc<HashMap<NodeId, usize>>> = HashMap::new();
+            sp.slots = pin
+                .iter()
+                .filter_map(|id| {
+                    let parent = doc.get(*id)?.parent()?;
+                    let siblings = parents.entry(parent).or_insert_with(|| {
+                        let children = doc.get(parent).map_or(&[][..], |p| p.children());
+                        Arc::new(children.iter().enumerate().map(|(i, c)| (*c, i)).collect())
+                    });
+                    let slot = Slot {
+                        place: (parent, *siblings.get(id)?),
+                        siblings: siblings.clone(),
+                    };
+                    Some((*id, slot))
+                })
+                .collect();
+            sp.slots_at = Some((rev, pin));
+        }
         let ids = match &self.size_preview.pinned {
             Some(p) => p.clone(),
             None => self.session.selection.ids().to_vec(),
@@ -376,6 +395,7 @@ impl OndinApp {
             // What changes while hidden is not seen happen, so no heir is read
             // from it.
             self.size_preview.slots.clear();
+            self.size_preview.slots_at = None;
             return;
         }
         let prefs = self.prefs.size_preview.clone();

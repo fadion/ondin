@@ -115,7 +115,7 @@ impl SettingsTab {
         Self::Assistant,
     ];
 
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Self::General => "General",
             Self::Library => "Library",

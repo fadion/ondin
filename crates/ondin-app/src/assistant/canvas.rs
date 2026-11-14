@@ -165,57 +165,37 @@ impl OndinApp {
                 .order(egui::Order::Middle)
                 .fixed_pos(b.place.min)
                 .show(ctx, |ui| {
-                    let (r, resp) = ui.allocate_exact_size(b.place.size(), egui::Sense::click());
-                    let p = ui.painter();
-                    let (ground, ink) = match (lit, resp.hovered()) {
-                        (true, false) => (color::accent_600(), color::on_accent()),
-                        (true, true) => (color::accent(), color::on_accent()),
-                        (false, true) => (color::raised(), color::text()),
-                        (false, false) => (color::card(), theme::text::strong()),
-                    };
-                    let shadow = egui::epaint::Shadow {
-                        offset: [0, 4],
-                        blur: 12,
-                        spread: 0,
-                        color: egui::Color32::from_black_alpha(90),
-                    };
-                    p.add(shadow.as_shape(r, 6.0));
-                    p.rect_filled(r, 6.0, ground);
-                    let glyph = theme::icon_font(ASK_GLYPH_PT);
-                    match &b.attached {
-                        None => {
-                            p.rect_stroke(
-                                r,
-                                6.0,
-                                egui::Stroke::new(1.0, color::card_border()),
-                                egui::StrokeKind::Inside,
-                            );
-                            p.text(
-                                r.center(),
-                                egui::Align2::CENTER_CENTER,
-                                icon::SPARKLE,
-                                glyph,
-                                ink,
-                            );
+                    let resp = crate::ui::float_button(ui, b.place.size(), lit, |p, r, ink| {
+                        let glyph = theme::icon_font(ASK_GLYPH_PT);
+                        match &b.attached {
+                            None => {
+                                p.text(
+                                    r.center(),
+                                    egui::Align2::CENTER_CENTER,
+                                    icon::SPARKLE,
+                                    glyph,
+                                    ink,
+                                );
+                            }
+                            Some((_, n)) => {
+                                let x = r.left() + ASK_PAD;
+                                p.text(
+                                    egui::pos2(x + ASK_GLYPH_PT / 2.0, r.center().y),
+                                    egui::Align2::CENTER_CENTER,
+                                    icon::SPARKLE,
+                                    glyph,
+                                    ink,
+                                );
+                                p.text(
+                                    egui::pos2(x + ASK_GLYPH_PT + ASK_NUM_GAP, r.center().y),
+                                    egui::Align2::LEFT_CENTER,
+                                    n.to_string(),
+                                    egui::FontId::proportional(crate::ui::SMALL_PT),
+                                    ink,
+                                );
+                            }
                         }
-                        Some((_, n)) => {
-                            let x = r.left() + ASK_PAD;
-                            p.text(
-                                egui::pos2(x + ASK_GLYPH_PT / 2.0, r.center().y),
-                                egui::Align2::CENTER_CENTER,
-                                icon::SPARKLE,
-                                glyph,
-                                ink,
-                            );
-                            p.text(
-                                egui::pos2(x + ASK_GLYPH_PT + ASK_NUM_GAP, r.center().y),
-                                egui::Align2::LEFT_CENTER,
-                                n.to_string(),
-                                egui::FontId::proportional(crate::ui::SMALL_PT),
-                                ink,
-                            );
-                        }
-                    }
+                    });
                     resp.on_hover_text(match lit {
                         true => "Detach from the assistant",
                         false => "Ask the assistant",

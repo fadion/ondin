@@ -793,12 +793,7 @@ fn bar_frame() -> egui::Frame {
             1.0,
             theme::color::text_on(color::card(), 15),
         ))
-        .shadow(egui::epaint::Shadow {
-            offset: [0, 6],
-            blur: 18,
-            spread: 0,
-            color: egui::Color32::from_black_alpha(70),
-        })
+        .shadow(crate::ui::CARD_SHADOW)
         .corner_radius(egui::CornerRadius::same(5))
         .inner_margin(egui::Margin::symmetric(0, 9))
 }

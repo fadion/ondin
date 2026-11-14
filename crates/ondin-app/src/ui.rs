@@ -451,6 +451,48 @@ pub fn canvas_pill_padded(
     rect
 }
 
+/// The shadow under chrome that floats over the canvas and stays: an inspector
+/// card, the path bar, a [`float_button`]. Lighter than [`MENU_SHADOW`], which
+/// lifts what opens over them.
+pub const CARD_SHADOW: egui::epaint::Shadow = egui::epaint::Shadow {
+    offset: [0, 6],
+    blur: 18,
+    spread: 0,
+    color: egui::Color32::from_black_alpha(70),
+};
+
+/// A button floating over the canvas by itself, as the assistant's ask button
+/// does: a card's ground, border and [`CARD_SHADOW`], raised on hover, the
+/// accent when `lit`. `paint` draws its face in the ink it is given.
+pub fn float_button(
+    ui: &mut egui::Ui,
+    size: egui::Vec2,
+    lit: bool,
+    paint: impl FnOnce(&egui::Painter, egui::Rect, egui::Color32),
+) -> egui::Response {
+    const RADIUS: f32 = 6.0;
+    let (r, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+    let p = ui.painter();
+    let (ground, ink) = match (lit, resp.hovered()) {
+        (true, false) => (color::accent_600(), color::on_accent()),
+        (true, true) => (color::accent(), color::on_accent()),
+        (false, true) => (color::raised(), color::text()),
+        (false, false) => (color::card(), theme::text::strong()),
+    };
+    p.add(CARD_SHADOW.as_shape(r, RADIUS));
+    p.rect_filled(r, RADIUS, ground);
+    if !lit {
+        p.rect_stroke(
+            r,
+            RADIUS,
+            egui::Stroke::new(1.0, color::card_border()),
+            egui::StrokeKind::Inside,
+        );
+    }
+    paint(p, r, ink);
+    resp
+}
+
 /// The shadow under every floating card: [`menu_frame`]'s, and egui's own popups
 /// (a `ComboBox`'s list, a tooltip), which `theme::install` gives it so a
 /// dropdown's list and a menu cast the same shadow.
@@ -1467,12 +1509,7 @@ pub fn card_at<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> (R
             1.0,
             theme::color::text_on(color::card(), 15),
         ))
-        .shadow(egui::epaint::Shadow {
-            offset: [0, 6],
-            blur: 18,
-            spread: 0,
-            color: egui::Color32::from_black_alpha(70),
-        })
+        .shadow(CARD_SHADOW)
         .corner_radius(egui::CornerRadius::same(5))
         .inner_margin(egui::Margin::symmetric(CARD_MARGIN_X as i8, 12))
         .show(ui, |ui| {
@@ -3428,6 +3465,29 @@ pub fn list_row_fill(lit: bool, hovered: bool) -> Option<egui::Color32> {
         (false, true) => Some(color::hover()),
         (false, false) => None,
     }
+}
+
+/// A row standing in for rows folded away (*+3 calls*), `h` tall and the
+/// width it is given: a field's ground that takes a list row's hover, its
+/// `text` dim. A click opens what it holds; the cursor stays the arrow, as on
+/// all chrome.
+pub fn more_row(ui: &mut egui::Ui, h: f32, text: &str) -> egui::Response {
+    let w = ui.available_width();
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::click());
+    let p = ui.painter();
+    p.rect_filled(
+        rect,
+        4.0,
+        list_row_fill(false, resp.hovered()).unwrap_or(color::field()),
+    );
+    p.text(
+        egui::pos2(rect.left() + 8.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        text,
+        egui::FontId::proportional(CAPTION_PT),
+        theme::text::dim(),
+    );
+    resp
 }
 
 /// The frame a frameless `TextEdit` in a field row takes, for a row whose content

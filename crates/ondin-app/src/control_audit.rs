@@ -393,6 +393,14 @@ fn active_icon_button(g: &Ground) -> bool {
         && g.stroke.color == color::accent()
 }
 
+/// A `ui::layer_chip`: [`ui::CHIP_H`] tall on the accent wash, ringed
+/// `accent_300()` while lit or hovered.
+fn layer_chip(g: &Ground) -> bool {
+    (g.rect.height() - ui::CHIP_H).abs() <= SLOP
+        && g.fill == color::accent_a(46)
+        && [Color32::TRANSPARENT, color::accent_300()].contains(&g.stroke.color)
+}
+
 /// A `ui::slider`'s rail or its filled part: a rounded hairline track.
 fn slider_rail(g: &Ground) -> bool {
     (g.rect.height() - ui::SLIDER_RAIL_H).abs() <= SLOP && g.stroke == Stroke::NONE
@@ -410,6 +418,12 @@ const EXEMPT: &[Exempt] = &[
         why: "shows the paint itself (a checker under the colour, a ring round it), \
               not a control state; the standard names swatch chips as deliberately shorter",
         is: chip,
+    },
+    Exempt {
+        what: "layer chip",
+        why: "`ui::layer_chip` names a layer attached to the assistant, a reference \
+              to point at in the accent's wash, not a form control's state",
+        is: layer_chip,
     },
     Exempt {
         what: "active icon button",
@@ -1200,36 +1214,56 @@ fn sweep_on(theme: Theme) {
         a.type_menu = Some(crate::app::TypeTab::Character)
     });
     check("type popover", app, found);
-    // Every tab, since each shows only its own rows.
-    let names = [
-        "settings: General",
-        "settings: Library",
-        "settings: Canvas",
-        "settings: Text",
-        "settings: Assets",
-        "settings: Assistant",
-    ];
-    for (tab, name) in crate::settings::SettingsTab::ALL.into_iter().zip(names) {
+    // Every tab, since each shows only its own rows; named by the tab itself, so
+    // a new tab cannot go unaudited.
+    for tab in crate::settings::SettingsTab::ALL {
         let mut app = with_a_rect(&ctx);
         let found = opened(&ctx, &mut app, |c, a| a.toggle_settings(c, Some(tab)));
+        // The report keeps each name for the run.
+        let name = Box::leak(format!("settings: {}", tab.label()).into_boxed_str());
         check(name, app, found);
     }
-    // The assistant's panel: its head's Access dropdown, and a reply's options.
+    // The assistant's panel: its head's Access dropdown, a question's chip, a
+    // turn's folded calls and its foot, a proposal and a reply's options.
     let mut app = with_a_rect(&ctx);
     let found = opened(&ctx, &mut app, |_, a| {
-        use crate::assistant::thread::{Msg, Part};
+        use crate::assistant::thread::{Chip, Msg, Part, Stats, ToolRow, ToolState};
+        let id = a.session.selection.ids()[0].to_wire();
+        let chip = Chip {
+            id: id.clone(),
+            name: "Card".into(),
+            kind: "rect".into(),
+            w: 120.0,
+            h: 80.0,
+        };
+        let call = |i: usize, name: &str, proposal: Option<u64>| {
+            Part::Tool(ToolRow {
+                id: format!("t{i}"),
+                name: name.into(),
+                arg: id.clone(),
+                state: ToolState::Done,
+                result: "+24 lines".into(),
+                proposal,
+            })
+        };
+        let mut parts: Vec<Part> = (0..5).map(|i| call(i, "get_node", None)).collect();
+        parts.push(call(5, "propose_edit", Some(1)));
+        parts.push(Part::Text(
+            "Which?\n```options\nAlign both\nCentre both\nMove it above\n```".into(),
+        ));
         a.assistant.msgs = vec![
             Msg::Person {
                 text: "Which way?".into(),
-                chips: Vec::new(),
+                chips: vec![chip],
             },
             Msg::Agent {
                 speaker: "Claude".into(),
                 harness: "claude".into(),
-                parts: vec![Part::Text(
-                    "Which?\n```options\nAlign both\nCentre both\nMove it above\n```".into(),
-                )],
-                stats: None,
+                parts,
+                stats: Some(Stats {
+                    seconds: 14.0,
+                    tokens: Some(3100),
+                }),
             },
         ];
         a.open_assistant();

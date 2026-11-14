@@ -1077,22 +1077,7 @@ fn tool_row(ui: &mut egui::Ui, t: &ToolRow) {
 
 /// *+N calls*, the folded rows' stand-in; a click opens them.
 fn fold_row(ui: &mut egui::Ui, more: usize) -> egui::Response {
-    let w = ui.available_width();
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, TOOL_H), egui::Sense::click());
-    let p = ui.painter();
-    p.rect_filled(
-        rect,
-        4.0,
-        ui::list_row_fill(false, resp.hovered()).unwrap_or(color::field()),
-    );
-    p.text(
-        egui::pos2(rect.left() + 8.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        format!("+{}", ui::count(more, "call")),
-        egui::FontId::proportional(ui::CAPTION_PT),
-        theme::text::dim(),
-    );
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+    ui::more_row(ui, TOOL_H, &format!("+{}", ui::count(more, "call")))
 }
 
 /// Under a finished turn: its time and tokens, *Copy*, and on the last turn

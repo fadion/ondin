@@ -385,6 +385,80 @@ fn a_lone_solid_fill_is_its_colour() {
     );
 }
 
+/// A bound colour is its token alone as a lone fill, and a one-colour gradient
+/// of it in a stack, where a bare colour may only be the last layer.
+///
+/// flip: `paint`'s bound arm answering a stack layer (`false`) → fails at "a
+/// bound colour in a stack".
+#[test]
+fn a_bound_fill_is_its_token_alone_and_a_gradient_in_a_stack() {
+    use ondin_core::BrushSource;
+    use ondin_core::variable::{Cell, CollectionId, Mode, VarKind, Variable};
+    let mut d = Doc::new();
+    let light = d.ids.mint_mode();
+    d.apply(vec![Operation::AddMode {
+        collection: CollectionId::FIRST,
+        mode: Mode {
+            id: light,
+            name: "Light".into(),
+        },
+        index: 0,
+        cells: vec![],
+    }]);
+    let brand = d.ids.mint_var();
+    d.apply(vec![Operation::AddVariable {
+        var: Variable {
+            id: brand,
+            name: "brand".into(),
+            kind: VarKind::Color,
+            cells: [(light, Cell::Color(Color::from_rgba8(60, 120, 240, 255)))]
+                .into_iter()
+                .collect(),
+            scope: None,
+            origin: None,
+            forked: None,
+            description: String::new(),
+        },
+    }]);
+    let bound = |alpha: f32| Fill {
+        brush: BrushSource::Bound { var: brand, alpha },
+        visible: true,
+    };
+    let f = d.frame(None, 0.0, 0.0, 120.0, 80.0, "Board");
+    let a = d.rect(f, 10.0, 10.0, 40.0, 40.0, 0.0);
+    let b = d.rect(f, 60.0, 10.0, 40.0, 40.0, 0.0);
+    let under = Fill {
+        brush: solid(20, 160, 90, 255).into(),
+        visible: true,
+    };
+    d.apply(vec![
+        Operation::SetFills {
+            id: a,
+            fills: keyed_by_position([bound(1.0)]),
+        },
+        Operation::SetFills {
+            id: b,
+            fills: keyed_by_position([under, bound(0.5)]),
+        },
+    ]);
+    let (doc, res) = d.done();
+    let export = html_of(&doc, &res, doc.get(doc.first_page()).unwrap().children());
+    let css = String::from_utf8(export.file("styles.css").unwrap().to_vec()).unwrap();
+    assert!(
+        css.contains("background: var(--brand);"),
+        "a lone bound colour: {css}"
+    );
+    let stacked = css
+        .lines()
+        .find(|l| l.contains("background:") && l.contains("#14a05a"))
+        .unwrap_or_default();
+    assert!(
+        stacked.contains("background: linear-gradient(color-mix(")
+            && stacked.contains("linear-gradient(#14a05a, #14a05a);"),
+        "a bound colour in a stack: {css}"
+    );
+}
+
 /// `fidelity::check`, the command's door, finds nothing on a page that matches —
 /// white type on a blue fill included, which Chrome draws heavier — names the
 /// layers of one a stray rule moved, and names the type by its ink when a rule

@@ -1454,3 +1454,57 @@ fn a_frames_subtree_stays_within_its_byte_budget() {
         json.len()
     );
 }
+
+/// A path's `subpaths` give each point's arriving handle as `in` and its leaving
+/// one as `out`, the closing segment's handle folded onto the first point.
+/// flip: `path_runs` writing `in` from `a.out` and `out` from `a.back` → fails at
+/// "the first point's handles".
+#[test]
+fn a_paths_points_carry_their_handles_in_and_out() {
+    use ondin_core::kurbo::{Affine, BezPath};
+    use ondin_core::{Document, IdSource, NodeKind, Operation, Resolved, Transaction};
+    let mut ids = IdSource::new(0x5B5B);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let id = ids.mint();
+    let mut p = BezPath::new();
+    p.move_to((0.0, 0.0));
+    p.curve_to((5.0, -5.0), (15.0, -5.0), (20.0, 0.0));
+    p.curve_to((15.0, 5.0), (5.0, 5.0), (0.0, 0.0));
+    p.close_path();
+    doc.apply(&Transaction(vec![Operation::CreateNode {
+        id,
+        parent: root,
+        index: 0,
+        kind: NodeKind::Path {
+            path: p,
+            corner_radii: Vec::new(),
+            corner_smoothing: 0.0,
+            mirror: Default::default(),
+        },
+        transform: Some(Affine::IDENTITY),
+        name: None,
+    }]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    let snap = snapshot(&doc, &res);
+    let node = snap
+        .nodes
+        .iter()
+        .find(|n| n.id == wire(id))
+        .expect("the path");
+    let Geometry::Path { subpaths, .. } = &node.geometry else {
+        panic!("a path: {:?}", node.geometry)
+    };
+    assert_eq!(subpaths.len(), 1);
+    assert!(subpaths[0].closed);
+    let pts = &subpaths[0].points;
+    assert_eq!(pts.len(), 2, "the closing duplicate folded: {pts:?}");
+    let handles = |i: usize| (pts[i].in_x, pts[i].in_y, pts[i].out_x, pts[i].out_y);
+    assert_eq!(
+        handles(0),
+        (Some(5.0), Some(5.0), Some(5.0), Some(-5.0)),
+        "the first point's handles"
+    );
+    assert_eq!(handles(1), (Some(15.0), Some(-5.0), Some(15.0), Some(5.0)));
+}

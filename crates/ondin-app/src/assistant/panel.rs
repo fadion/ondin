@@ -505,7 +505,7 @@ impl OndinApp {
                     tool_row(ui, t);
                 }
                 Part::Text(text) => {
-                    let blocks = markdown::parse(text);
+                    let blocks = markdown::parsed(ui.ctx(), text);
                     let mut md: Vec<MdAct> = Vec::new();
                     ui.vertical(|ui| markdown::show(ui, &blocks, &look, &mut md));
                     for a in md {

@@ -39,6 +39,21 @@ pub(crate) enum Block {
     Rule,
 }
 
+/// [`parse`], kept across frames by the reply's text: a long thread re-parsed
+/// every frame cost tens of milliseconds, and a reply only changes while it
+/// streams. A reply not drawn for a frame is forgotten.
+pub(crate) fn parsed(ctx: &egui::Context, src: &str) -> std::sync::Arc<Vec<Block>> {
+    #[derive(Default)]
+    struct Parser;
+    impl egui::cache::ComputerMut<&str, std::sync::Arc<Vec<Block>>> for Parser {
+        fn compute(&mut self, src: &str) -> std::sync::Arc<Vec<Block>> {
+            std::sync::Arc::new(parse(src))
+        }
+    }
+    type Parsed = egui::cache::FrameCache<std::sync::Arc<Vec<Block>>, Parser>;
+    ctx.memory_mut(|m| m.caches.cache::<Parsed>().get(src).clone())
+}
+
 /// Parse a reply. An unclosed fence, as a streaming reply has, runs to the end.
 pub(crate) fn parse(src: &str) -> Vec<Block> {
     let lines: Vec<&str> = src.lines().collect();

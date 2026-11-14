@@ -378,7 +378,7 @@ impl OndinApp {
                                     false => format!("Starting {}…", h.label()),
                                     true => "Thinking…".into(),
                                 };
-                                stage_row(ui, &words, now - sent, now);
+                                stage_row(ui, &words, now - sent);
                             }
                         }
                         if let Some(s) = stats {
@@ -997,18 +997,10 @@ fn nudged_label(ui: &mut egui::Ui, text: egui::RichText, dy: f32) {
 }
 
 /// The waiting line: the spinner, the stage and the seconds since the send.
-fn stage_row(ui: &mut egui::Ui, words: &str, secs: f64, now: f64) {
+fn stage_row(ui: &mut egui::Ui, words: &str, secs: f64) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 7.0;
-        let (r, _) =
-            ui.allocate_exact_size(egui::vec2(ui::CONTROL_GLYPH_PT, 16.0), egui::Sense::hover());
-        ui::paint_spinner(
-            ui.painter(),
-            r.center(),
-            ui::CONTROL_GLYPH_PT - 2.0,
-            color::accent_300(),
-            now,
-        );
+        ui::spinner(ui, ui::CONTROL_GLYPH_PT - 2.0, color::accent_300());
         ui.label(
             egui::RichText::new(words)
                 .size(ui::CONTROL_PT)
